@@ -1,44 +1,69 @@
 {
   "expo": {
-    "name": "valhalla-bound",
+    "name": "Valhalla Bound",
     "slug": "valhalla-bound",
-    "version": "1.0.0",
+    "version": "1.9.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/valhalla.png",
     "scheme": "valhallabound",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/images/valhallaSplashcopy.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#050508"
+    },
     "ios": {
-      "icon": "./assets/expo.icon"
+      "supportsTablet": false,
+      "bundleIdentifier": "com.elijah.valhallabound",
+      "buildNumber": "34",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Valhalla Bound uses your camera to scan food barcodes and take progress photos for the Mead Hall.",
+        "NSPhotoLibraryUsageDescription": "Valhalla Bound accesses your photo library so you can add progress photos, stored only on your device.",
+        "UIBackgroundModes": [
+          "remote-notification"
+        ],
+        "ITSAppUsesNonExemptEncryption": false,
+        "LSApplicationQueriesSchemes": [
+          "instagram",
+          "tiktok",
+          "twitter",
+          "x"
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/images/valhalla.png",
+        "backgroundColor": "#050508"
       },
-      "predictiveBackGestureEnabled": false
-    },
-    "web": {
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "package": "com.elijah.valhallabound"
     },
     "plugins": [
       "expo-router",
+      "expo-font",
+      "expo-sqlite",
       [
-        "expo-splash-screen",
+        "expo-notifications",
         {
-          "backgroundColor": "#208AEF",
-          "android": {
-            "image": "./assets/images/splash-icon.png",
-            "imageWidth": 76
-          }
+          "icon": "./assets/images/valhalla.png",
+          "color": "#C9A84C",
+          "sounds": []
         }
-      ]
+      ],
+      "./plugins/withFmtFix"
     ],
     "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": true
-    }
+      "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "98710bda-1662-4f56-8b22-f456fd246a56"
+      },
+      "revenueCatApiKeyIos": "appl_PmWjvQElMCtTsMcOuTUarjrGTVk",
+      "router": {
+        "origin": false
+      }
+    },
+    "owner": "elijah433"
   }
 }

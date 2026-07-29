@@ -1,0 +1,520 @@
+import { useRef, useEffect, useState } from 'react';
+import {
+  View, Text, ScrollView, TouchableOpacity, StyleSheet,
+  Animated, Dimensions,
+} from 'react-native';
+import { router } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
+import { useWarriorStore } from '@/lib/store';
+import { Colors, Fonts, Spacing, Radii } from '@/constants/theme';
+import { VERSES } from '@/constants/havamol';
+import * as Clipboard from 'expo-clipboard';
+const { width } = Dimensions.get('window');
+
+const RUNES = ['ᚠ','ᚢ','ᚦ','ᚨ','ᚱ','ᚲ','ᚷ','ᚹ','ᚺ','ᚾ','ᛁ','ᛃ','ᛇ','ᛈ','ᛉ','ᛋ','ᛏ','ᛒ','ᛖ','ᛗ','ᛚ','ᛜ','ᛞ','ᛟ'];
+
+//  export const VERSES = [
+//   { num: 1, text: "Within the gates ere a man shall go, full warily let him watch, full long let him look about him; for little he knows where a foe may lurk, and sit in the seats within." },
+//   { num: 2, text: "Hail to the giver! a guest has come; where shall the stranger sit? Swift shall he be who, with swords shall try the proof of his might to make." },
+//   { num: 3, text: "Fire he needs who with frozen knees has come from the cold without; food and clothes must the farer have, the man from the mountains come." },
+//   { num: 4, text: "Water and towels and welcoming speech should he find who comes, to the feast; if renown he would get, and again be greeted, wisely and well must he act." },
+//   { num: 5, text: "Wits must he have who wanders wide, but all is easy at home; at the witless man the wise shall wink when among such men he sits." },
+//   { num: 6, text: "A man shall not boast of his keenness of mind, but keep it close in his breast; to the silent and wise does ill come seldom when he goes as guest to a house." },
+//   { num: 7, text: "The knowing guest who goes to the feast, in silent attention sits; with his ears he hears, with his eyes he watches, thus wary are wise men all." },
+//   { num: 8, text: "Happy the one who wins for himself favor and praises fair; less safe by far is the wisdom found that is hid in another's heart." },
+//   { num: 9, text: "Happy the man who has while he lives wisdom and praise as well, for evil counsel a man full oft has from another's heart." },
+//   { num: 10, text: "A better burden may no man bear for wanderings wide than wisdom; it is better than wealth on unknown ways, and in grief a refuge it gives." },
+//   { num: 11, text: "A better burden may no man bear for wanderings wide than wisdom; worse food for the journey he brings not afield than an over-drinking of ale." },
+//   { num: 12, text: "Less good there lies than most believe in ale for mortal men; for the more he drinks the less does man of his mind the mastery hold." },
+//   { num: 13, text: "Over beer the bird of forgetfulness broods, and steals the minds of men; with the heron's feathers fettered I lay and in Gunnloth's house was held." },
+//   { num: 14, text: "Drunk I was, I was dead-drunk, when with Fjalar wise I was; 'tis the best of drinking if back one brings his wisdom with him home." },
+//   { num: 15, text: "The son of a king shall be silent and wise and bold in battle as well; bravely and gladly a man shall go, till the day of his death is come." },
+//   { num: 16, text: "The sluggard believes he shall live forever, if the fight he faces not; but age shall not grant him the gift of peace, though spears may spare his life." },
+//   { num: 17, text: "The fool is agape when he comes to the feast, he stammers or else is still; but soon if he gets a drink is it seen what the mind of the man is like." },
+//   { num: 18, text: "He alone is aware who has wandered wide, and far abroad has fared, how great a mind is guided by him that wealth of wisdom has." },
+//   { num: 19, text: "Shun not the mead, but drink in measure; speak to the point or be still; for rudeness none shall rightly blame thee if soon thy bed thou seekest." },
+//   { num: 20, text: "The greedy man, if his mind be vague, will eat till sick he is; the vulgar man, when among the wise, to scorn by his belly is brought." },
+//   { num: 21, text: "The herds know well when home they shall fare, and then from the grass they go; but the foolish man his belly's measure shall never know aright." },
+//   { num: 22, text: "A paltry man and poor of mind at all things ever mocks; for never he knows, what he ought to know, that he is not free from faults." },
+//   { num: 23, text: "The witless man is awake all night, thinking of many things; care-worn he is when the morning comes, and his woe is just as it was." },
+//   { num: 24, text: "The foolish man for friends all those who laugh at him will hold; when among the wise he marks it not though hatred of him they speak." },
+//   { num: 25, text: "The foolish man for friends all those who laugh at him will hold; but the truth when he comes to the council he learns, that few in his favor will speak." },
+//   { num: 26, text: "An ignorant man thinks that all he knows, when he sits by himself in a corner; but never what answer to make he knows, when others with questions come." },
+//   { num: 27, text: "A witless man, when he meets with men, had best in silence abide; for no one shall find that nothing he knows, if his mouth is not open too much." },
+//   { num: 28, text: "Wise shall he seem who well can question, and also answer well; nought is concealed that men may say among the sons of men." },
+//   { num: 29, text: "Often he speaks who never is still with words that win no faith; the babbling tongue, if a bridle it find not, oft for itself sings ill." },
+//   { num: 30, text: "In mockery no one a man shall hold, although he fare to the feast; wise seems one oft, if nought he is asked, and safely he sits dry-skinned." },
+//   { num: 31, text: "Wise a guest holds it to take to his heels, when mock of another he makes; but little he knows who laughs at the feast, though he mocks in the midst of his foes." },
+//   { num: 32, text: "Friendly of mind are many men, till feasting they mock at their friends; to mankind a bane must it ever be when guests together strive." },
+//   { num: 33, text: "Oft should one make an early meal, nor fasting come to the feast; else he sits and chews as if he would choke, and little is able to ask." },
+//   { num: 34, text: "Crooked and far is the road to a foe, though his house on the highway be; but wide and straight is the way to a friend, though far away he fare." },
+//   { num: 35, text: "Forth shall one go, nor stay as a guest in a single spot forever; love becomes loathing if long one sits by the hearth in another's home." },
+//   { num: 36, text: "Better a house, though a hut it be, a man is master at home; a pair of goats and a patched-up roof are better far than begging." },
+//   { num: 37, text: "Better a house, though a hut it be, a man is master at home; his heart is bleeding who needs must beg when food he fain would have." },
+//   { num: 38, text: "Away from his arms in the open field a man should fare not a foot; for never he knows when the need for a spear shall arise on the distant road." },
+//   { num: 39, text: "If wealth a man has won for himself, let him never suffer in need; oft he saves for a foe what he plans for a friend, for much goes worse than we wish." },
+//   { num: 40, text: "None so free with gifts or food have I found that gladly he took not a gift, nor one who so widely scattered his wealth that of recompense hatred he had." },
+//   { num: 41, text: "Friends shall gladden each other with arms and garments, as each for himself can see; gift-givers' friendships are longest found, if fair their fates may be." },
+//   { num: 42, text: "To his friend a man a friend shall prove, and gifts with gifts requite; but men shall mocking with mockery answer, and fraud with falsehood meet." },
+//   { num: 43, text: "To his friend a man a friend shall prove, to him and the friend of his friend; but never a man shall friendship make with one of his foeman's friends." },
+//   { num: 44, text: "If a friend thou hast whom thou fully wilt trust, and good from him wouldst get, thy thoughts with his mingle, and gifts shalt thou make, and fare to find him oft." },
+//   { num: 45, text: "If another thou hast whom thou hardly wilt trust, yet good from him wouldst get, thou shalt speak him fair, but falsely think, and fraud with falsehood requite." },
+//   { num: 46, text: "So is it with him whom thou hardly wilt trust, and whose mind thou mayst not know; laugh with him mayst thou, but speak not thy mind, like gifts to his shalt thou give." },
+//   { num: 47, text: "Young was I once, and wandered alone, and nought of the road I knew; rich did I feel when a comrade I found, for man is man's delight." },
+//   { num: 48, text: "The lives of the brave and noble are best, sorrows they seldom feed; but the coward fear of all things feels, and not gladly the niggard gives." },
+//   { num: 49, text: "My garments once in a field I gave to a pair of carven poles; heroes they seemed when clothes they had, but the naked man is nought." },
+//   { num: 50, text: "On the hillside drear the fir-tree dies, all bootless its needles and bark; it is like a man whom no one loves, why should his life be long?" },
+//   { num: 51, text: "Hotter than fire between false friends does friendship five days burn; when the sixth day comes the fire cools, and ended is all the love." },
+//   { num: 52, text: "No great thing needs a man to give, oft little will purchase praise; with half a loaf and a half-filled cup a friend full fast I made." },
+//   { num: 53, text: "A little sand has a little sea, and small are the minds of men; though all men are not equal in wisdom, yet half-wise only are all." },
+//   { num: 54, text: "A measure of wisdom each man shall have, but never too much let him know; the fairest lives do those men live whose wisdom wide has grown." },
+//   { num: 55, text: "A measure of wisdom each man shall have, but never too much let him know; for the wise man's heart is seldom happy, if wisdom too great he has won." },
+//   { num: 56, text: "A measure of wisdom each man shall have, but never too much let him know; let no man the fate before him see, for so is he freest from sorrow." },
+//   { num: 57, text: "A brand from a brand is kindled and burned, and fire from fire begotten; and man by his speech is known to men, and the stupid by their stillness." },
+//   { num: 58, text: "He must early go forth who fain the blood or the goods of another would get; the wolf that lies idle shall win little meat, or the sleeping man success." },
+//   { num: 59, text: "He must early go forth whose workers are few, himself his work to seek; much remains undone for the morning-sleeper, for the swift is wealth half won." },
+//   { num: 60, text: "Of seasoned shingles and strips of bark for the thatch let one know his need, and how much of wood he must have for a month, or in half a year he will use." },
+//   { num: 61, text: "Washed and fed to the council fare, but care not too much for thy clothes; let none be ashamed of his shoes and hose, less still of the steed he rides." },
+//   { num: 62, text: "When the eagle comes to the ancient sea, he snaps and hangs his head; so is a man in the midst of a throng, who few to speak for him finds." },
+//   { num: 63, text: "To question and answer must all be ready who wish to be known as wise; tell one thy thoughts, but beware of two, all know what is known to three." },
+//   { num: 64, text: "The man who is prudent a measured use of the might he has will make; he finds when among the brave he fares that the boldest he may not be." },
+//   { num: 65, text: "A man must be watchful and wary as well, and fearful of trusting a friend. Oft for the words that to others one speaks he will get but an evil gift." },
+//   { num: 66, text: "Too early to many a meeting I came, and some too late have I sought; the beer was all drunk, or not yet brewed; little the loathed man finds." },
+//   { num: 67, text: "To their homes men would bid me hither and yon, if at meal-time I needed no meat, or would hang two hams in my true friend's house, where only one I had eaten." },
+//   { num: 68, text: "Fire for men is the fairest gift, and power to see the sun; health as well, if a man may have it, and a life not stained with sin." },
+//   { num: 69, text: "All wretched is no man, though never so sick; some from their sons have joy, some win it from kinsmen, and some from their wealth, and some from worthy works." },
+//   { num: 70, text: "It is better to live than to lie a corpse, the live man catches the cow; I saw flames rise for the rich man's pyre, and before his door he lay dead." },
+//   { num: 71, text: "The lame rides a horse, the handless is herdsman, the deaf in battle is bold; the blind man is better than one that is burned, no good can come of a corpse." },
+//   { num: 72, text: "A son is better, though late he be born, and his father to death have fared; memory-stones seldom stand by the road save when kinsman honors his kin." },
+//   { num: 73, text: "Two make a battle, the tongue slays the head; in each furry coat a fist I look for." },
+//   { num: 74, text: "He welcomes the night whose fare is enough, uneasy are autumn nights; full oft does the weather change in a week, and more in a month's time." },
+//   { num: 75, text: "A man knows not, if nothing he knows, that gold oft apes begets; one man is wealthy and one is poor, yet scorn for him none should know." },
+//   { num: 76, text: "Among Fitjung's sons saw I well-stocked folds, now bear they the beggar's staff; wealth is as swift as a winking eye, of friends the falsest it is." },
+//   { num: 77, text: "Cattle die, and kinsmen die, and so one dies one's self; but a noble name will never die, if good renown one gets." },
+//   { num: 78, text: "Cattle die, and kinsmen die, and so one dies one's self; one thing now that never dies, the fame of a dead man's deeds." },
+//   { num: 79, text: "Certain is that which is sought from runes, that the gods so great have made, and the Master-Poet painted; of the race of gods: silence is safest and best." },
+//   { num: 80, text: "An unwise man, if a maiden's love or wealth he chances to win, his pride will wax, but his wisdom never, straight forward he fares in conceit." },
+//   { num: 81, text: "Give praise to the day at evening, to a woman on her pyre, to a weapon which is tried, to a maid at wedlock, to ice when it is crossed, to ale that is drunk." },
+//   { num: 82, text: "When the gale blows hew wood, in fair winds seek the water; sport with maidens at dusk, for day's eyes are many; from the ship seek swiftness, from the shield protection, cuts from the sword, from the maiden kisses." },
+//   { num: 83, text: "By the fire drink ale, over ice go on skates; buy a steed that is lean, and a sword when tarnished, the horse at home fatten, the hound in thy dwelling." },
+//   { num: 84, text: "A man shall trust not the oath of a maid, nor the word a woman speaks; for their hearts on a whirling wheel were fashioned, and fickle their breasts were formed." },
+//   { num: 85, text: "In a breaking bow or a burning flame, a ravening wolf or a croaking raven, in a grunting boar, a tree with roots broken, in billowy seas or a bubbling kettle," },
+//   { num: 86, text: "In a flying arrow or falling waters, in ice new formed or the serpent's folds, in a bride's bed-speech or a broken sword, in the sport of bears or in sons of kings," },
+//   { num: 87, text: "In a calf that is sick or a stubborn thrall, a flattering witch or a foe new slain." },
+//   { num: 88, text: "In a brother's slayer, if thou meet him abroad, in a half-burned house, in a horse full swift, one leg is hurt and the horse is useless, none had ever such faith as to trust in them all." },
+//   { num: 89, text: "Hope not too surely for early harvest, nor trust too soon in thy son; the field needs good weather, the son needs wisdom, and oft is either denied." },
+//   { num: 90, text: "The love of women fickle of will is like starting o'er ice with a steed unshod, a two-year-old restive and little tamed, or steering a rudderless ship in a storm, or, lame, hunting reindeer on slippery rocks." },
+//   { num: 91, text: "Clear now will I speak, for I know them both, men false to women are found; when fairest we speak, then falsest we think, against wisdom we work with deceit." },
+//   { num: 92, text: "Soft words shall he speak and wealth shall he offer who longs for a maiden's love, and the beauty praise of the maiden bright; he wins whose wooing is best." },
+//   { num: 93, text: "Fault for loving let no man find ever with any other; oft the wise are fettered, where fools go free, by beauty that breeds desire." },
+//   { num: 94, text: "Fault with another let no man find for what touches many a man; wise men oft into witless fools are made by mighty love." },
+//   { num: 95, text: "The head alone knows what dwells near the heart, a man knows his mind alone; no sickness is worse to one who is wise than to lack the longed-for joy." },
+//   { num: 96, text: "This found I myself, when I sat in the reeds, and long my love awaited; as my life the maiden wise I loved, yet her I never had." },
+//   { num: 97, text: "Billing's daughter I found on her bed, in slumber bright as the sun; empty appeared an earl's estate without that form so fair." },
+//   { num: 98, text: "Othin, again at evening come, if a woman thou wouldst win; evil it were if others than we should know of such a sin." },
+//   { num: 99, text: "Away I hastened, hoping for joy, and careless of counsel wise; well I believed that soon I should win measureless joy with the maid." },
+//   { num: 100, text: "So came I next when night it was, the warriors all were awake; with burning lights and waving brands I learned my luckless way." },
+//   { num: 101, text: "At morning then, when once more I came, and all were sleeping still, a dog found in the fair one's place, bound there upon her bed." },
+//   { num: 102, text: "Many fair maids, if a man but tries them, false to a lover are found; that did I learn when I longed to gain with wiles the maiden wise; foul scorn was my meed from the crafty maid, and nought from the woman I won." },
+//   { num: 103, text: "Though glad at home, and merry with guests, a man shall be wary and wise; the sage and shrewd, wide wisdom seeking, must see that his speech be fair; a fool is he named who nought can say, for such is the way of the witless." },
+//   { num: 104, text: "I found the old giant, now back have I fared, small gain from silence I got; full many a word, my will to get, I spoke in Suttung's hall." },
+//   { num: 105, text: "The mouth of Rati made room for my passage, and space in the stone he gnawed; above and below the giants' paths lay, so rashly I risked my head." },
+//   { num: 106, text: "Gunnloth gave on a golden stool a drink of the marvelous mead; a harsh reward did I let her have for her heroic heart, and her spirit troubled sore." },
+//   { num: 107, text: "The well-earned beauty well I enjoyed, little the wise man lacks; so Othrorir now has up been brought to the midst of the men of earth." },
+//   { num: 108, text: "Hardly, methinks, would I home have come, and left the giants' land, had not Gunnloth helped me, the maiden good, whose arms about me had been." },
+//   { num: 109, text: "The day that followed, the frost-giants came, some word of Hor to win, of Bolverk they asked, were he back midst the gods, or had Suttung slain him there?" },
+//   { num: 110, text: "On his ring swore Othin the oath, methinks; who now his troth shall trust? Suttung's betrayal he sought with drink, and Gunnloth to grief he left." },
+//   { num: 111, text: "It is time to chant from the chanter's stool; by the wells of Urth I was, I saw and was silent, I saw and thought, and heard the speech of Hor." },
+//   { num: 112, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: rise not at night, save if news thou seekest, or fain to the outhouse wouldst fare." },
+//   { num: 113, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: beware of sleep on a witch's bosom, nor let her limbs ensnare thee." },
+//   { num: 114, text: "Such is her might that thou hast no mind for the council or meeting of men; meat thou hatest, joy thou hast not, and sadly to slumber thou farest." },
+//   { num: 115, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: seek never to win the wife of another, or long for her secret love." },
+//   { num: 116, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: if o'er mountains or gulfs thou fain wouldst go, look well to thy food for the way." },
+//   { num: 117, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: an evil man thou must not let bring aught of ill to thee; for an evil man will never make reward for a worthy thought." },
+//   { num: 118, text: "I saw a man who was wounded sore by an evil woman's word; a lying tongue his death-blow launched, and no word of truth there was." },
+//   { num: 119, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: if a friend thou hast whom thou fully wilt trust, then fare to find him oft; for brambles grow and waving grass on the rarely trodden road." },
+//   { num: 120, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: a good man find to hold in friendship, and give heed to his healing charms." },
+//   { num: 121, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: be never the first to break with thy friend the bond that holds you both; care eats the heart if thou canst not speak to another all thy thought." },
+//   { num: 122, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: exchange of words with a witless ape thou must not ever make." },
+//   { num: 123, text: "For never thou mayst from an evil man a good requital get; but a good man oft the greatest love through words of praise will win thee." },
+//   { num: 124, text: "Mingled is love when a man can speak to another all his thought; nought is so bad as false to be, no friend speaks only fair." },
+//   { num: 125, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: with a worse man speak not three words in dispute, ill fares the better oft when the worse man wields a sword." },
+//   { num: 126, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: a shoemaker be, or a maker of shafts, for only thy single self; if the shoe is ill made, or the shaft prove false, then evil of thee men think." },
+//   { num: 127, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: if evil thou knowest, as evil proclaim it, and make no friendship with foes." },
+//   { num: 128, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: in evil never joy shalt thou know, but glad the good shall make thee." },
+//   { num: 129, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: look not up when the battle is on, like madmen the sons of men become, lest men bewitch thy wits." },
+//   { num: 130, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: if thou fain wouldst win a woman's love, and gladness get from her, fair be thy promise and well fulfilled; none loathes what good he gets." },
+//   { num: 131, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: I bid thee be wary, but be not fearful; beware most with ale or another's wife, and third beware lest a thief outwit thee." },
+//   { num: 132, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: scorn or mocking ne'er shalt thou make of a guest or a journey-goer." },
+//   { num: 133, text: "Oft scarcely he knows who sits in the house what kind is the man who comes; none so good is found that faults he has not, nor so wicked that nought he is worth." },
+//   { num: 134, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: scorn not ever the gray-haired singer, oft do the old speak good; oft from shrivelled skin come skillful counsels." },
+//   { num: 135, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: curse not thy guest, nor show him thy gate, deal well with a man in want." },
+//   { num: 136, text: "Strong is the beam that raised must be to give an entrance to all; give it a ring, or grim will be the wish it would work on thee." },
+//   { num: 137, text: "I rede thee, Loddfafnir! and hear thou my rede, profit thou hast if thou hearest, great thy gain if thou learnest: when ale thou drinkest, seek might of earth, for earth cures drink, and fire cures ills; the field absorbs the flood." },
+//   { num: 138, text: "Now are Hor's words spoken in the hall, kind for the kindred of men, cursed for the kindred of giants: hail to the speaker, and to him who learns! Profit be his who has them! Hail to them who hearken!" },
+//   { num: 139, text: "I ween that I hung on the windy tree, hung there for nights full nine; with the spear I was wounded, and offered I was to Othin, myself to myself, on the tree that none may ever know what root beneath it runs." },
+//   { num: 140, text: "None made me happy with loaf or horn, and there below I looked; I took up the runes, shrieking I took them, and forthwith back I fell." },
+//   { num: 141, text: "Nine mighty songs I got from the son of Bolthorn, Bestla's father; and a drink I got of the goodly mead poured out from Othrörir." },
+//   { num: 142, text: "Then began I to thrive, and wisdom to get, I grew and well I was; each word led me on to another word, each deed to another deed." },
+//   { num: 143, text: "Runes shalt thou find, and fateful signs, that the king of singers colored, and the mighty gods have made; full strong the signs, full mighty the signs that the ruler of gods doth write." },
+//   { num: 144, text: "Othin for the gods, Dain for the elves, and Dvalin for the dwarfs, Alsvith for giants and all mankind, and some myself I wrote." },
+//   { num: 145, text: "Knowest how one shall write, knowest how one shall rede? Knowest how one shall tint, knowest how one makes trial? Knowest how one shall ask, knowest how one shall offer? Knowest how one shall send, knowest how one shall sacrifice?" },
+//   { num: 146, text: "Better no prayer than too big an offering, by thy getting measure thy gift; better is none than too big a sacrifice. So Thund of old wrote ere man's race began, where he rose on high when home he came." },
+//   { num: 147, text: "The songs I know that king's wives know not, nor men that are sons of men; the first is called help, and help it can bring thee in sorrow and pain and sickness." },
+//   { num: 148, text: "A second I know, that men shall need who leechcraft long to use." },
+//   { num: 149, text: "A third I know, if great is my need of fetters to hold my foe; blunt do I make mine enemy's blade, nor bites his sword or staff." },
+//   { num: 150, text: "A fourth I know, if men shall fasten bonds on my bended legs; so great is the charm that forth I may go, the fetters spring from my feet, broken the bonds from my hands." },
+//   { num: 151, text: "A fifth I know, if I see from afar an arrow fly 'gainst the folk; it flies not so swift that I stop it not, if ever my eyes behold it." },
+//   { num: 152, text: "A sixth I know, if harm one seeks with a sapling's roots to send me; the hero himself who wreaks his hate shall taste the ill ere I." },
+//   { num: 153, text: "A seventh I know, if I see in flames the hall o'er my comrades' heads; it burns not so wide that I will not quench it, I know that song to sing." },
+//   { num: 154, text: "An eighth I know, that is to all of greatest good to learn; when hatred grows among heroes' sons, I soon can set it right." },
+//   { num: 155, text: "A ninth I know, if need there comes to shelter my ship on the flood; the wind I calm upon the waves, and the sea I put to sleep." },
+//   { num: 156, text: "A tenth I know, what time I see house-riders flying on high; so can I work that wildly they go, showing their true shapes, hence to their own homes." },
+//   { num: 157, text: "An eleventh I know, if needs I must lead to the fight my long-loved friends; I sing in the shields, and in strength they go whole to the field of fight, whole from the field of fight, and whole they come thence home." },
+//   { num: 158, text: "A twelfth I know, if high on a tree I see a hanged man swing; so do I write and color the runes that forth he fares, and to me talks." },
+//   { num: 159, text: "A thirteenth I know, if a thane full young with water I sprinkle well; he shall not fall, though he fares mid the host, nor sink beneath the swords." },
+//   { num: 160, text: "A fourteenth I know, if fain I would name to men the mighty gods; all know I well of the gods and elves, few be the fools know this." },
+//   { num: 161, text: "A fifteenth I know, that before the doors of Delling sang Thjothrorir the dwarf; might he sang for the gods, and glory for elves, and wisdom for Hroptatyr wise." },
+//   { num: 162, text: "A sixteenth I know, if I seek delight to win from a maiden wise; the mind I turn of the white-armed maid, and thus change all her thoughts." },
+//   { num: 163, text: "A seventeenth I know, so that seldom shall go a maiden young from me." },
+//   { num: 164, text: "Long these songs thou shalt, Loddfafnir, seek in vain to sing; yet good it were if thou mightest get them, well, if thou wouldst them learn, help, if thou hadst them." },
+//    { num: 165, text: "An eighteenth I know, that ne'er will I tell to maiden or wife of man; the best is what none but one's self doth know, so comes the end of the songs, save only to her in whose arms I lie, or who else my sister is." },
+//     ];
+
+
+export default function HavamolScreen() {
+  const { warrior, workoutCount } = useWarriorStore();
+  const fadeAnim  = useRef(new Animated.Value(0)).current;
+  const glowAnim  = useRef(new Animated.Value(0)).current;
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [filter, setFilter]     = useState<'all' | 'unlocked'>('unlocked');
+ const [copied, setCopied] = useState<number | null>(null);
+  const unlockedCount = Math.max(3, Math.min(workoutCount, VERSES.length));
+
+  useEffect(() => {
+    Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }).start();
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnim, { toValue: 1, duration: 4000, useNativeDriver: true }),
+        Animated.timing(glowAnim, { toValue: 0, duration: 4000, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+
+  const glowOpacity = glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.05, 0.18] });
+  async function copyVerse(verse: { num: number; text: string }) {
+  const text = `ᚠ  ᚢ  ᚦ  ᚨ  ᚱ  ᚲ  ᚷ  ᚹ\n\n"${verse.text}"\n\n— Hávamál, Stanza ${verse.num}\nValhalla Bound · Norse Fitness\n\nᚠ  ᚢ  ᚦ  ᚨ  ᚱ  ᚲ  ᚷ  ᚹ`;
+  await Clipboard.setStringAsync(text);
+  setCopied(verse.num);
+  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  setTimeout(() => setCopied(null), 2000);
+}
+  const displayVerses = filter === 'unlocked' ? VERSES.slice(0, unlockedCount) : VERSES;
+
+  return (
+    <View style={styles.root}>
+      <LinearGradient colors={['#0A0610', '#050508', '#08050C']} style={StyleSheet.absoluteFill} />
+      <Animated.View style={[styles.topGlow, { opacity: glowOpacity }]} />
+      <Text style={styles.bgRune}>ᚺ</Text>
+
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
+
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+              <Text style={styles.backBtnText}>← BACK</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+
+            {/* Title */}
+            <View style={styles.titleBlock}>
+              <Text style={styles.eyebrow}>ODIN'S WISDOM</Text>
+              <Text style={styles.title}>HÁVAMÁL</Text>
+              <View style={styles.runeRow}>
+                <View style={styles.runeLine} />
+                <Text style={styles.runeRowText}>ᚠ  ᚢ  ᚦ  ᚨ  ᚱ  ᚲ  ᚷ  ᚹ</Text>
+                <View style={styles.runeLine} />
+              </View>
+              <Text style={styles.subtitle}>
+                Sayings of the High One.{'\n'}Carved by Odin. Carried by warriors since the 13th century.
+              </Text>
+            </View>
+
+            {/* Progress card */}
+            <View style={styles.progressCard}>
+              <LinearGradient colors={['rgba(201,168,76,0.08)', 'transparent']} style={StyleSheet.absoluteFill} />
+              <LinearGradient colors={['transparent', Colors.gold, 'transparent']} style={styles.progressCardLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+              <View style={styles.progressLeft}>
+                <Text style={styles.progressVal}>{unlockedCount}</Text>
+                <Text style={styles.progressLabel}>OF {VERSES.length}{'\n'}UNLOCKED</Text>
+              </View>
+              <View style={styles.progressDivider} />
+              <View style={styles.progressRight}>
+                <Text style={styles.progressName}>{warrior?.name ?? 'WARRIOR'}</Text>
+                <Text style={styles.progressDesc}>
+                  {unlockedCount >= VERSES.length
+                    ? 'All wisdom earned. You are Einherjar.'
+                    : `${VERSES.length - unlockedCount} verses await. One battle. One verse.`}
+                </Text>
+                <View style={styles.progressTrack}>
+                  <View style={[styles.progressFill, { width: `${(unlockedCount / VERSES.length) * 100}%` }]}>
+                    <LinearGradient colors={[Colors.goldDark, Colors.gold]} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+                  </View>
+                </View>
+                <Text style={styles.progressPct}>{Math.round((unlockedCount / VERSES.length) * 100)}% of the Hávamál</Text>
+              </View>
+            </View>
+
+            {/* Filter tabs */}
+            <View style={styles.filterRow}>
+              {(['unlocked', 'all'] as const).map((f) => (
+                <TouchableOpacity
+                  key={f}
+                  style={[styles.filterBtn, filter === f && styles.filterBtnActive]}
+                  onPress={() => { setFilter(f); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                  activeOpacity={0.8}
+                >
+                  {filter === f && <LinearGradient colors={['rgba(201,168,76,0.12)', 'transparent']} style={StyleSheet.absoluteFill} />}
+                  <Text style={[styles.filterBtnText, filter === f && styles.filterBtnTextActive]}>
+                    {f === 'unlocked' ? `UNLOCKED (${unlockedCount})` : `ALL (${VERSES.length})`}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Verses */}
+            {displayVerses.map((verse, i) => {
+              const unlocked   = i < unlockedCount;
+              const isExpanded = expanded === verse.num;
+              const rune       = RUNES[i % RUNES.length];
+
+              if (filter === 'all' && !unlocked) {
+                return (
+                  <View key={verse.num} style={styles.lockedCard}>
+                    <Text style={styles.lockedRune}>{rune}</Text>
+                    <View style={styles.lockedText}>
+                      <Text style={styles.lockedNum}>{verse.num}</Text>
+                      <Text style={styles.lockedSub}>
+                        Log {i - unlockedCount + 1} more {i - unlockedCount + 1 === 1 ? 'battle' : 'battles'}
+                      </Text>
+                    </View>
+                    <Text style={styles.lockIcon}>ᛉ</Text>
+                  </View>
+                );
+              }
+return (
+  <TouchableOpacity
+    key={verse.num}
+    style={[styles.verseCard, isExpanded && styles.verseCardExpanded]}
+    onPress={() => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setExpanded(isExpanded ? null : verse.num);
+    }}
+    activeOpacity={0.85}
+  >
+    <LinearGradient
+      colors={isExpanded
+        ? ['rgba(201,168,76,0.09)', 'rgba(201,168,76,0.03)', 'transparent']
+        : ['rgba(255,255,255,0.03)', 'transparent']}
+      style={StyleSheet.absoluteFill}
+    />
+    {isExpanded && (
+      <LinearGradient
+        colors={['transparent', Colors.gold, 'transparent']}
+        style={styles.verseCardTopLine}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+      />
+    )}
+
+    <Text style={[styles.verseWatermark, isExpanded && { color: 'rgba(201,168,76,0.07)' }]}>
+      {rune}
+    </Text>
+
+    <View style={styles.verseHeader}>
+      <View style={[styles.verseNumBadge, isExpanded && styles.verseNumBadgeActive]}>
+        <Text style={[styles.verseNum, isExpanded && styles.verseNumActive]}>{verse.num}</Text>
+      </View>
+      <Text
+        style={[styles.verseText, isExpanded && styles.verseTextExpanded]}
+        numberOfLines={isExpanded ? undefined : 2}
+      >
+        {verse.text}
+      </Text>
+      <Text style={[styles.chevron, isExpanded && { color: Colors.gold }]}>
+        {isExpanded ? '↑' : '↓'}
+      </Text>
+    </View>
+
+    {isExpanded && (
+      <View style={styles.verseFooter}>
+        <View style={styles.verseDivider}>
+          <View style={styles.verseDividerLine} />
+          <Text style={styles.verseDividerRune}>{rune}</Text>
+          <View style={styles.verseDividerLine} />
+        </View>
+        <Text style={styles.verseAttrib}>— Hávamál, Stanza {verse.num} of {VERSES.length}</Text>
+        <TouchableOpacity style={styles.copyBtn} onPress={() => copyVerse(verse)} activeOpacity={0.8}>
+          <Text style={styles.copyBtnText}>
+            {copied === verse.num ? 'COPIED ✓' : 'COPY VERSE'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    )}
+
+  </TouchableOpacity>
+);
+})}
+
+{/* Bottom */}
+<View style={styles.bottom}>
+  <Text style={styles.bottomRunes}>ᚠ  ᚢ  ᚦ  ᚨ  ᚱ  ᚲ  ᚷ  ᚹ</Text>
+  <Text style={styles.bottomNote}>
+    The Hávamál — wisdom attributed to Odin the All-Father.{'\n'}
+    Old Norse manuscript, c. 13th century.{'\n'}
+    One verse unlocked per battle logged.
+  </Text>
+</View>
+
+</ScrollView>
+</Animated.View>
+</SafeAreaView>
+</View>
+);
+}
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#050508' },
+  safe: { flex: 1 },
+  container: { flex: 1 },
+
+  topGlow: {
+    position: 'absolute', top: -100, left: width * 0.05,
+    width: width * 0.9, height: 400,
+    backgroundColor: 'rgba(139,26,26,0.3)',
+    borderRadius: 999,
+    transform: [{ scaleX: 1.2 }, { scaleY: 0.4 }],
+    pointerEvents: 'none',
+  },
+  bgRune: {
+    position: 'absolute', fontSize: 400, fontFamily: 'System',
+    color: 'rgba(201,168,76,0.025)', top: 30, left: -60,
+    lineHeight: 400, pointerEvents: 'none',
+  },
+
+  header: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md, paddingBottom: Spacing.sm },
+  backBtn: { alignSelf: 'flex-start', paddingVertical: 8 },
+  backBtnText: { fontFamily: Fonts.body, fontSize: 11, letterSpacing: 2, color: Colors.textMuted },
+
+  scrollContent: { paddingHorizontal: Spacing.lg, paddingBottom: 80 },
+
+  titleBlock: { alignItems: 'center', gap: 10, marginBottom: Spacing.lg },
+  eyebrow: { fontFamily: Fonts.body, fontSize: 8, letterSpacing: 5, color: 'rgba(201,168,76,0.5)' },
+  title: {
+    fontFamily: Fonts.display, fontSize: 52, color: Colors.gold,
+    letterSpacing: 6, textAlign: 'center',
+    textShadowColor: 'rgba(201,168,76,0.4)',
+    textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 28,
+  },
+  runeRow: { flexDirection: 'row', alignItems: 'center', gap: 10, width: '90%' },
+  runeLine: { flex: 1, height: 1, backgroundColor: 'rgba(201,168,76,0.2)' },
+  runeRowText: { fontFamily: 'System', fontSize: 11, color: 'rgba(201,168,76,0.4)', letterSpacing: 5 },
+  subtitle: {
+    fontFamily: Fonts.proseItalic, fontSize: 13,
+    color: Colors.textMuted, textAlign: 'center',
+    lineHeight: 20, fontStyle: 'italic',
+  },
+
+  progressCard: {
+    flexDirection: 'row', alignItems: 'center',
+    borderWidth: 1, borderColor: 'rgba(201,168,76,0.2)',
+    borderRadius: 18, overflow: 'hidden',
+    backgroundColor: 'rgba(10,8,14,0.95)',
+    marginBottom: Spacing.md, padding: Spacing.md, gap: 14,
+  },
+  progressCardLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 1 },
+  progressLeft: { alignItems: 'center', gap: 2, minWidth: 56 },
+  progressVal: { fontFamily: Fonts.display, fontSize: 34, color: Colors.gold, lineHeight: 36 },
+  progressLabel: { fontFamily: Fonts.body, fontSize: 7, letterSpacing: 1.5, color: Colors.textMuted, textAlign: 'center', lineHeight: 11 },
+  progressDivider: { width: 1, height: 50, backgroundColor: 'rgba(255,255,255,0.08)' },
+  progressRight: { flex: 1, gap: 5 },
+  progressName: { fontFamily: Fonts.heading, fontSize: 11, color: Colors.gold, letterSpacing: 2 },
+  progressDesc: { fontFamily: Fonts.proseItalic, fontSize: 11, color: Colors.textMuted, fontStyle: 'italic', lineHeight: 16 },
+  progressTrack: { height: 3, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: 2, overflow: 'hidden' },
+  progressPct: { fontFamily: Fonts.body, fontSize: 8, color: Colors.textDim, letterSpacing: 0.5 },
+
+  filterRow: {
+    flexDirection: 'row', gap: 8, marginBottom: Spacing.md,
+  },
+  filterBtn: {
+    flex: 1, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 10, paddingVertical: 10, alignItems: 'center',
+    overflow: 'hidden', backgroundColor: 'rgba(8,6,12,0.9)',
+  },
+  filterBtnActive: { borderColor: 'rgba(201,168,76,0.3)' },
+  filterBtnText: { fontFamily: Fonts.body, fontSize: 9, letterSpacing: 2, color: Colors.textMuted },
+  filterBtnTextActive: { color: Colors.gold },
+
+  verseCard: {
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 14, padding: Spacing.md,
+    overflow: 'hidden', backgroundColor: 'rgba(8,6,12,0.95)',
+    marginBottom: 6,
+  },
+  verseCardExpanded: { borderColor: 'rgba(201,168,76,0.28)', marginBottom: 10 },
+  verseCardTopLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 1 },
+  verseWatermark: {
+    position: 'absolute', right: 8, bottom: 4,
+    fontSize: 52, fontFamily: 'System',
+    color: 'rgba(255,255,255,0.025)', lineHeight: 56,
+  },
+  verseHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  verseNumBadge: {
+    width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  verseNumBadgeActive: { backgroundColor: 'rgba(201,168,76,0.12)', borderColor: 'rgba(201,168,76,0.3)' },
+  verseNum: { fontFamily: Fonts.body, fontSize: 9, color: Colors.textMuted, letterSpacing: 0.5 },
+  verseNumActive: { color: Colors.gold },
+  verseText: { flex: 1, fontFamily: Fonts.prose, fontSize: 14, color: Colors.textMuted, lineHeight: 22 },
+  verseTextExpanded: { color: Colors.text },
+  chevron: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textDim, marginTop: 2 },
+
+  verseFooter: { marginTop: Spacing.md, gap: 6 },
+  verseDivider: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  verseDividerLine: { flex: 1, height: 1, backgroundColor: 'rgba(201,168,76,0.12)' },
+  verseDividerRune: { fontFamily: 'System', fontSize: 14, color: 'rgba(201,168,76,0.4)' },
+  verseAttrib: { fontFamily: Fonts.proseItalic, fontSize: 11, color: Colors.textDim, fontStyle: 'italic' },
+
+  lockedCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 10, paddingVertical: 10, paddingHorizontal: Spacing.md,
+    overflow: 'hidden', backgroundColor: 'rgba(6,4,10,0.7)',
+    marginBottom: 4,
+  },
+  lockedRune: { fontSize: 18, fontFamily: 'System', color: 'rgba(255,255,255,0.08)' },
+  lockedText: { flex: 1 },
+  lockedNum: { fontFamily: Fonts.body, fontSize: 9, color: Colors.textDim, letterSpacing: 1 },
+  lockedSub: { fontFamily: Fonts.prose, fontSize: 11, color: Colors.textDim, fontStyle: 'italic' },
+  lockIcon: { fontFamily: 'System', fontSize: 14, color: Colors.textDim, opacity: 0.3 },
+
+  bottom: { alignItems: 'center', paddingTop: Spacing.xl, gap: 10 },
+  bottomRunes: { fontFamily: 'System', fontSize: 12, color: 'rgba(201,168,76,0.15)', letterSpacing: 8 },
+  bottomNote: { fontFamily: Fonts.proseItalic, fontSize: 11, color: Colors.textDim, textAlign: 'center', fontStyle: 'italic', lineHeight: 18 },
+  copyBtn: {
+  borderWidth: 1, borderColor: 'rgba(201,168,76,0.25)',
+  borderRadius: 8, paddingVertical: 8,
+  alignItems: 'center', backgroundColor: 'rgba(201,168,76,0.06)',
+  marginTop: 4,
+},
+copyBtnText: {
+  fontFamily: Fonts.body, fontSize: 9,
+  letterSpacing: 2, color: Colors.gold,
+},
+});
