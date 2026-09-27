@@ -9,15 +9,18 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
+import * as Speech from 'expo-speech';
+import * as KeepAwake from 'expo-keep-awake';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WeaponSVG } from '../../components/WeaponSVG';
 import {
   createStrengthSession, addStrengthSet, checkAndUpdatePR, deleteStrengthSet,
-  getPersonalRecord,
+  getPersonalRecord, getSessionsForExercise, type StrengthSet,
 } from '@/lib/db';
 import { analyzeProgressiveOverload, type OverloadSuggestion } from '@/lib/progressiveOverload';
 import { estimatedOneRepMax } from '@/lib/oneRepMax';
 import { useWarriorStore } from '@/lib/store';
+import { useGuidedSessionStore } from '@/lib/guidedSession';
 import { Colors, Fonts, Spacing, Radii } from '@/constants/theme';
 
 const { width, height } = Dimensions.get('window');
@@ -92,6 +95,42 @@ function getSessionTip(sets: LoggedSet[], currentPR: number | null): string | nu
   }
 
   return null;
+}
+
+// Ghost Racing — compares a set logged THIS session against the set at
+// the same set number from the last time this exercise was actually
+// trained (not just the all-time PR, a specific past session — "what did
+// I do at set 2 last time", not "what's my best set 2 ever"). Weight is
+// compared first since that's the primary axis of progress for most
+// lifts; if the weight matches exactly, reps become the tiebreaker.
+// Returns null when there's no ghost set at this set number to compare
+// against (first time doing this many sets, or the exercise has never
+// been logged before), which is a perfectly normal outcome — the caller
+// just shows nothing rather than a misleading comparison.
+type GhostComparison = { label: string; kind: 'ahead' | 'behind' | 'same' };
+
+function getGhostComparison(ghostSets: StrengthSet[], setNumber: number, weight: number, reps: number): GhostComparison | null {
+  const ghost = ghostSets.find(g => g.set_number === setNumber);
+  if (!ghost) return null;
+
+  if (weight > ghost.weight) return { label: `+${(weight - ghost.weight).toFixed(1).replace(/\.0$/, '')} lbs vs last time`, kind: 'ahead' };
+  if (weight < ghost.weight) return { label: `-${(ghost.weight - weight).toFixed(1).replace(/\.0$/, '')} lbs vs last time`, kind: 'behind' };
+
+  if (reps > ghost.reps) return { label: `+${reps - ghost.reps} reps vs last time`, kind: 'ahead' };
+  if (reps < ghost.reps) return { label: `-${ghost.reps - reps} reps vs last time`, kind: 'behind' };
+  return { label: 'Matched last time', kind: 'same' };
+}
+
+// Thin, defensive wrappers around expo-keep-awake — different installed
+// versions have shuffled this API's exact shape before (sync vs. async
+// activate), so these guard against a hard crash if the installed
+// version doesn't match what's called here, rather than letting a
+// missing method take down the whole rest-timer flow.
+function safeActivateKeepAwake() {
+  try { KeepAwake.activateKeepAwakeAsync?.().catch?.(() => {}); } catch {}
+}
+function safeDeactivateKeepAwake() {
+  try { KeepAwake.deactivateKeepAwake?.(); } catch {}
 }
 
 function FloatingRune({ color, delay, x }: { color: string; delay: number; x: number }) {
@@ -323,10 +362,26 @@ const ss = StyleSheet.create({
 
 // ── MAIN SCREEN ──────────────────────────────────────────────────────────────
 export default function StrengthLogScreen() {
-  const params = useLocalSearchParams<{ exerciseId: string; exerciseName: string; noXp: string }>();
+  const params = useLocalSearchParams<{ exerciseId: string; exerciseName: string; noXp: string; guided: string }>();
   const exerciseId   = params.exerciseId   ?? 'custom';
   const exerciseName = params.exerciseName ?? 'Exercise';
   const { recordWorkout, warrior } = useWarriorStore();
+
+  // Guided Session — this screen doesn't own the queue, it just reads it.
+  // The queue is set up by whoever launched this session (Exercise
+  // Picker's multi-select, or Swift Forge's "Start Guided Session"), and
+  // survives across exercises because each advance uses router.replace
+  // rather than router.push — so there's only ever ONE Strength Log
+  // screen in the stack during a guided session, not one per exercise
+  // piling up underneath. These reads happen once at mount and don't
+  // need to be reactive: the queue only changes when THIS screen calls
+  // advance()/endSession(), at which point the whole screen remounts
+  // fresh for the next exercise anyway.
+  const isGuided = params.guided === '1';
+  const guidedProgress = useGuidedSessionStore.getState().getProgress();
+  const guidedCurrent  = isGuided ? useGuidedSessionStore.getState().getCurrent() : null;
+  const guidedUpNext   = isGuided ? useGuidedSessionStore.getState().getUpNext() : null;
+  const isLastGuidedExercise = isGuided && guidedProgress.total > 0 && guidedProgress.current >= guidedProgress.total;
 
   const [sessionId,    setSessionId]    = useState<number | null>(null);
   const [sets,         setSets]         = useState<LoggedSet[]>([]);
@@ -337,6 +392,13 @@ export default function StrengthLogScreen() {
   const [currentPR,    setCurrentPR]    = useState<number | null>(null);
   const [overloadSuggestion, setOverloadSuggestion] = useState<OverloadSuggestion | null>(null);
   const [overloadDismissed, setOverloadDismissed] = useState(false);
+  // Ghost Racing — the sets from the last time this exact exercise was
+  // trained, fetched once at mount, before today's session is created
+  // (same ordering reason as the overload analysis below: fetching after
+  // would risk today's own brand-new, still-empty session getting
+  // treated as "most recent").
+  const [ghostSets, setGhostSets] = useState<StrengthSet[]>([]);
+  const [beatGhostOnce, setBeatGhostOnce] = useState(false);
   const [sessionTipDismissed, setSessionTipDismissed] = useState(false);
   const [showPRFlash,  setShowPRFlash]  = useState(false);
   const [showSocial,   setShowSocial]   = useState(false);
@@ -353,6 +415,14 @@ export default function StrengthLogScreen() {
   const timerRef      = useRef<ReturnType<typeof setInterval> | null>(null);
   const repsRef       = useRef<TextInput>(null);
   const lastSessionTipRef = useRef<string | null>(null);
+  // Tracks the CURRENT rest duration (not the original 90s) so the
+  // progress bar stays accurate after a "+15s" tap extends it, and so
+  // the ten-second audio warning fires at the right moment regardless
+  // of extensions. A ref, not state — it's mutated synchronously right
+  // before the state update that triggers the re-render reading it, so
+  // there's no lag between the two.
+  const restDurationRef = useRef(90);
+  const tenSecWarnedRef = useRef(false);
 
   const weaponColor = WEAPON_COLORS[weaponKey] ?? Colors.gold;
 
@@ -392,25 +462,86 @@ export default function StrengthLogScreen() {
       .then(setOverloadSuggestion)
       .catch(() => setOverloadSuggestion(null));
 
+    // Same "fetch before creating today's session" ordering as above —
+    // getSessionsForExercise() already filters out zero-set sessions on
+    // its own, but there's no reason to rely on that when simply asking
+    // first avoids the question entirely.
+    const priorSessions = getSessionsForExercise(exerciseId, 1);
+    if (priorSessions.length > 0) {
+      setGhostSets(priorSessions[0].sets);
+    }
+
     const id = createStrengthSession(exerciseId, exerciseName);
     setSessionId(id);
     const pr = getPersonalRecord(exerciseId);
     if (pr) setCurrentPR(pr.best_weight);
     Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
     AsyncStorage.getItem('valhalla_weapon').then(w => { if (w) setWeaponKey(w); });
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      Speech.stop();
+      safeDeactivateKeepAwake();
+    };
   }, []);
 
+  // Keeps the screen awake for the duration of an active rest timer —
+  // without this, the phone can lock mid-rest (very likely if it's set
+  // down on a bench or gym floor) and the countdown becomes invisible
+  // even though it's still running underneath. Released the moment rest
+  // ends so this screen doesn't keep the whole app awake indefinitely.
+  useEffect(() => {
+    if (timerActive) {
+      safeActivateKeepAwake();
+    } else {
+      safeDeactivateKeepAwake();
+    }
+  }, [timerActive]);
+
   function startRestTimer() {
+    restDurationRef.current = 90;
+    tenSecWarnedRef.current = false;
     setRestTimer(90);
     setTimerActive(true);
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
       setRestTimer(t => {
-        if (t <= 1) { clearInterval(timerRef.current!); setTimerActive(false); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); return 0; }
+        // Light warning buzz + a short "10 seconds" callout at the
+        // 10-second mark — audio, not just haptic, since a phone in a
+        // pocket or on the floor means the countdown itself isn't
+        // visible either.
+        if (t === 11 && !tenSecWarnedRef.current) {
+          tenSecWarnedRef.current = true;
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          Speech.speak('Ten seconds', { rate: 1.1 });
+        }
+        if (t <= 1) {
+          clearInterval(timerRef.current!);
+          setTimerActive(false);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          Speech.speak('Rest over', { rate: 1.05 });
+          return 0;
+        }
         return t - 1;
       });
     }, 1000);
+  }
+
+  // Cuts rest short — for when you're ready before the clock says so.
+  function handleSkipRest() {
+    if (timerRef.current) clearInterval(timerRef.current);
+    Speech.stop();
+    setTimerActive(false);
+    setRestTimer(0);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  }
+
+  // Tacks 15 more seconds on — for when the clock says go but you're not
+  // there yet (still racking weight, waiting on equipment, etc).
+  function handleAddRestTime() {
+    restDurationRef.current += 15;
+    tenSecWarnedRef.current = false; // may need to warn again if this pushes back past the 10s mark
+    setRestTimer(t => t + 15);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }
 
   function flashPR(w: string, r: string) {
@@ -450,6 +581,20 @@ export default function StrengthLogScreen() {
     setSets(prev => [...prev, { id: setId, setNumber: setNum, reps: repsNum, weight: weightNum, isPR }]);
     if (isPR) { setCurrentPR(weightNum); flashPR(weight, reps); }
     else Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+
+    // A distinct light haptic the first time THIS session pulls ahead of
+    // the ghost (last time's set at the same set number) — a PR flash
+    // already covers the bigger "beat your all-time best" moment, this
+    // is the smaller, more frequent "ahead of last time" one. Once per
+    // session so it doesn't fire on every single set after the first.
+    if (!beatGhostOnce) {
+      const ghostCmp = getGhostComparison(ghostSets, setNum, weightNum, repsNum);
+      if (ghostCmp?.kind === 'ahead') {
+        setBeatGhostOnce(true);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    }
+
     startRestTimer();
     setReps(''); setWeight('');
   }
@@ -487,15 +632,73 @@ export default function StrengthLogScreen() {
     );
   }
 
+  // Ends this exercise. In a normal (non-guided) session that means
+  // going back to wherever it was launched from — same as always. In a
+  // guided session it means moving on to the next exercise in the queue
+  // via router.replace (so the stack never grows past one Strength Log
+  // screen), or, on the last exercise, ending the session and going back
+  // exactly like a normal finish would.
   function handleFinish() {
     if (sets.length === 0) { Alert.alert('No sets logged', 'Log at least one set before finishing.'); return; }
     if (timerRef.current) clearInterval(timerRef.current);
+    Speech.stop();
+    safeDeactivateKeepAwake();
     if (params.noXp !== '1') {
       recordWorkout('strength');
     }
+
+    if (isGuided) {
+      const next = useGuidedSessionStore.getState().advance();
+      if (next) {
+        router.replace({
+          pathname: '/(modals)/strength-log',
+          params: {
+            exerciseId: next.exerciseId,
+            exerciseName: next.exerciseName,
+            guided: '1',
+            noXp: params.noXp ?? '0',
+          },
+        });
+        return;
+      }
+      useGuidedSessionStore.getState().endSession();
+    }
+
     router.back();
   }
-  const timerPercent = (restTimer / 90) * 100;
+
+  // Bails out of a guided session early — confirmed first, since it
+  // cancels every exercise still queued up (not just this one). A
+  // normal, non-guided session's back button is untouched: it's always
+  // been a free, no-confirmation exit and stays that way.
+  function handleBack() {
+    if (!isGuided) { router.back(); return; }
+    Alert.alert(
+      'End guided session?',
+      sets.length > 0
+        ? "What you've logged for this exercise is already saved. The rest of your planned session will be cancelled."
+        : "This ends your guided session before it really got going.",
+      [
+        { text: 'Keep training', style: 'cancel' },
+        {
+          text: 'End session',
+          style: 'destructive',
+          onPress: () => {
+            if (timerRef.current) clearInterval(timerRef.current);
+            Speech.stop();
+            safeDeactivateKeepAwake();
+            useGuidedSessionStore.getState().endSession();
+            router.back();
+          },
+        },
+      ]
+    );
+  }
+
+  const timerPercent = (restTimer / restDurationRef.current) * 100;
+  const finishLabel = isGuided ? (isLastGuidedExercise ? 'FINISH SESSION' : 'NEXT ▸') : 'FINISH';
+  const targetSetsReached =
+    isGuided && !!guidedCurrent?.targetSets && sets.length >= (guidedCurrent!.targetSets as number);
 
   return (
     <View style={styles.root}>
@@ -548,14 +751,32 @@ export default function StrengthLogScreen() {
         <KeyboardAvoidingView style={styles.kbAware} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
 
           <View style={styles.header}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
               <Text style={styles.backBtnText}>← BACK</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.finishBtn} onPress={handleFinish}>
               <LinearGradient colors={[Colors.goldDark, Colors.gold]} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
-              <Text style={styles.finishBtnText}>FINISH</Text>
+              <Text style={styles.finishBtnText}>{finishLabel}</Text>
             </TouchableOpacity>
           </View>
+
+          {/* Guided session progress — only present when this screen was
+              launched as part of a queued session (Exercise Picker
+              multi-select or Swift Forge). Shows where you are in the
+              plan and what's coming up, so "guided" actually reads as
+              guided rather than just another single-exercise screen. */}
+          {isGuided && (
+            <View style={styles.guidedBar}>
+              <Text style={styles.guidedBarProgress}>
+                EXERCISE {guidedProgress.current} OF {guidedProgress.total}
+              </Text>
+              {guidedUpNext && (
+                <Text style={styles.guidedBarNext} numberOfLines={1}>
+                  NEXT: {guidedUpNext.exerciseName}
+                </Text>
+              )}
+            </View>
+          )}
 
           <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
 
@@ -570,6 +791,13 @@ export default function StrengthLogScreen() {
                   <Text style={styles.hallBtnText}>ᛟ FEATS</Text>
                 </TouchableOpacity>
               </View>
+              {isGuided && guidedCurrent?.targetSets && (
+                <Text style={[styles.guidedTargetNote, targetSetsReached && styles.guidedTargetNoteDone]}>
+                  {targetSetsReached
+                    ? `✓ Plan complete — ${guidedCurrent.targetSets}×${guidedCurrent.targetReps ?? '?'} done. Tap ${finishLabel} when ready.`
+                    : `Plan: ${guidedCurrent.targetSets}×${guidedCurrent.targetReps ?? '?'}`}
+                </Text>
+              )}
 
               {/* Estimated 1RM — the "more pro" stat at the top of the
                   page. Uses the Epley formula against the best set logged
@@ -603,6 +831,14 @@ export default function StrengthLogScreen() {
                     <LinearGradient colors={[Colors.ice, 'rgba(168,196,212,0.4)']} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
                   </View>
                 </View>
+                <View style={styles.timerControls}>
+                  <TouchableOpacity style={styles.timerControlBtn} onPress={handleAddRestTime} activeOpacity={0.8}>
+                    <Text style={styles.timerControlText}>+15s</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.timerControlBtn} onPress={handleSkipRest} activeOpacity={0.8}>
+                    <Text style={styles.timerControlText}>SKIP ▸</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             )}
 
@@ -618,6 +854,14 @@ export default function StrengthLogScreen() {
                       <Text style={styles.prevBestLabel}>CURRENT PR</Text>
                       <Text style={styles.prevBestWeight}>{currentPR}<Text style={styles.prevBestUnit}> lbs</Text></Text>
                       <Text style={styles.prevBestSub}>Beat this. Carve a new rune.</Text>
+                    </View>
+                  )}
+                  {ghostSets.length > 0 && (
+                    <View style={styles.ghostCard}>
+                      <Text style={styles.ghostCardLabel}>ᛃ LAST TIME</Text>
+                      <Text style={styles.ghostCardSets} numberOfLines={2}>
+                        {ghostSets.map(g => `${g.weight}×${g.reps}`).join('   ·   ')}
+                      </Text>
                     </View>
                   )}
                   {overloadSuggestion && !overloadDismissed && (
@@ -669,26 +913,40 @@ export default function StrengthLogScreen() {
                         <Text style={[styles.setsTableHead, { flex: 0.8 }]}>STATUS</Text>
                         <View style={{ width: 32 }} />
                       </View>
-                      {sets.map((s) => (
-                        <View key={s.id} style={[styles.setRow, s.isPR && styles.setRowPR]}>
-                          {s.isPR && <LinearGradient colors={['rgba(201,168,76,0.08)', 'transparent']} style={StyleSheet.absoluteFill} />}
-                          <Text style={[styles.setCell, { flex: 0.5 }]}>{s.setNumber}</Text>
-                          <Text style={[styles.setCell, { flex: 1 }, s.isPR && styles.setCellPR]}>{s.weight} lbs</Text>
-                          <Text style={[styles.setCell, { flex: 1 }]}>{s.reps}</Text>
-                          <View style={{ flex: 0.8, alignItems: 'center' }}>
-                            {s.isPR
-                              ? <View style={styles.prTag}><Text style={styles.prTagText}>⚡ PR</Text></View>
-                              : <Text style={styles.setCell}>✓</Text>}
+                      {sets.map((s) => {
+                        const ghostCmp = getGhostComparison(ghostSets, s.setNumber, s.weight, s.reps);
+                        return (
+                          <View key={s.id} style={[styles.setRow, s.isPR && styles.setRowPR]}>
+                            {s.isPR && <LinearGradient colors={['rgba(201,168,76,0.08)', 'transparent']} style={StyleSheet.absoluteFill} />}
+                            <View style={styles.setRowMain}>
+                              <Text style={[styles.setCell, { flex: 0.5 }]}>{s.setNumber}</Text>
+                              <Text style={[styles.setCell, { flex: 1 }, s.isPR && styles.setCellPR]}>{s.weight} lbs</Text>
+                              <Text style={[styles.setCell, { flex: 1 }]}>{s.reps}</Text>
+                              <View style={{ flex: 0.8, alignItems: 'center' }}>
+                                {s.isPR
+                                  ? <View style={styles.prTag}><Text style={styles.prTagText}>⚡ PR</Text></View>
+                                  : <Text style={styles.setCell}>✓</Text>}
+                              </View>
+                              <TouchableOpacity
+                                style={styles.setDeleteBtn}
+                                onPress={() => handleDeleteSet(s)}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                              >
+                                <Text style={styles.setDeleteBtnText}>✕</Text>
+                              </TouchableOpacity>
+                            </View>
+                            {ghostCmp && (
+                              <Text style={[
+                                styles.ghostCaption,
+                                ghostCmp.kind === 'ahead' && styles.ghostCaptionAhead,
+                                ghostCmp.kind === 'behind' && styles.ghostCaptionBehind,
+                              ]}>
+                                {ghostCmp.kind === 'ahead' ? '▲ ' : ghostCmp.kind === 'behind' ? '▼ ' : '● '}{ghostCmp.label}
+                              </Text>
+                            )}
                           </View>
-                          <TouchableOpacity
-                            style={styles.setDeleteBtn}
-                            onPress={() => handleDeleteSet(s)}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                          >
-                            <Text style={styles.setDeleteBtnText}>✕</Text>
-                          </TouchableOpacity>
-                        </View>
-                      ))}
+                        );
+                      })}
                     </View>
                   </ScrollView>
                 </>
@@ -763,6 +1021,15 @@ const styles = StyleSheet.create({
   finishBtn: { borderRadius: Radii.sm, overflow: 'hidden', paddingHorizontal: 18, paddingVertical: 8 },
   finishBtnText: { fontFamily: Fonts.heading, fontSize: 12, color: Colors.void, letterSpacing: 2 },
 
+  guidedBar: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: Spacing.lg, paddingBottom: 6, gap: 10,
+  },
+  guidedBarProgress: { fontFamily: Fonts.body, fontSize: 9, letterSpacing: 2, color: Colors.gold },
+  guidedBarNext: { fontFamily: Fonts.body, fontSize: 9, letterSpacing: 0.5, color: Colors.textMuted, flexShrink: 1, textAlign: 'right' },
+  guidedTargetNote: { fontFamily: Fonts.body, fontSize: 10, color: Colors.textMuted, marginTop: 4, letterSpacing: 0.3 },
+  guidedTargetNoteDone: { color: Colors.gold },
+
   content: { flex: 1, paddingHorizontal: Spacing.lg },
   exerciseHeader: { marginBottom: Spacing.sm, gap: 4 },
   exerciseEyebrow: { fontFamily: Fonts.body, fontSize: 9, letterSpacing: 4, color: Colors.blood },
@@ -789,6 +1056,12 @@ const styles = StyleSheet.create({
   timerValue: { fontFamily: Fonts.heading, fontSize: 20, color: Colors.ice },
   timerTrack: { height: 4, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' },
   timerFill: { height: '100%', borderRadius: 2, overflow: 'hidden' },
+  timerControls: { flexDirection: 'row', gap: 8, marginTop: 2 },
+  timerControlBtn: {
+    flex: 1, borderWidth: 1, borderColor: 'rgba(168,196,212,0.25)', borderRadius: Radii.sm,
+    paddingVertical: 8, alignItems: 'center', backgroundColor: 'rgba(168,196,212,0.05)',
+  },
+  timerControlText: { fontFamily: Fonts.body, fontSize: 10, letterSpacing: 1.5, color: Colors.ice },
 
   // Middle area — fills all space between header and input
   middle: { flex: 1, marginBottom: Spacing.sm },
@@ -805,6 +1078,12 @@ const styles = StyleSheet.create({
   prevBestWeight: { fontFamily: Fonts.display, fontSize: 48, color: Colors.gold, lineHeight: 52, textShadowColor: 'rgba(201,168,76,0.3)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 16 },
   prevBestUnit: { fontSize: 22 },
   prevBestSub: { fontFamily: Fonts.proseItalic, fontSize: 12, color: Colors.textMuted, fontStyle: 'italic' },
+  ghostCard: {
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 14,
+    padding: Spacing.md, backgroundColor: 'rgba(255,255,255,0.02)', gap: 4,
+  },
+  ghostCardLabel: { fontFamily: Fonts.body, fontSize: 9, letterSpacing: 2, color: Colors.textMuted },
+  ghostCardSets: { fontFamily: Fonts.subheading, fontSize: 13, color: Colors.text },
   overloadCard: {
     borderWidth: 1, borderColor: 'rgba(168,196,212,0.25)', borderRadius: 14,
     padding: Spacing.md, paddingRight: 34, overflow: 'hidden', backgroundColor: 'rgba(10,8,14,0.9)', gap: 4,
@@ -827,8 +1106,12 @@ const styles = StyleSheet.create({
   setsTable: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', borderRadius: Radii.md, overflow: 'hidden', backgroundColor: 'rgba(10,8,10,0.6)' },
   setsTableHeader: { flexDirection: 'row', paddingHorizontal: Spacing.md, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
   setsTableHead: { fontFamily: Fonts.body, fontSize: 8, letterSpacing: 2, color: Colors.textMuted, textAlign: 'center' },
-  setRow: { flexDirection: 'row', paddingHorizontal: Spacing.md, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)', alignItems: 'center', overflow: 'hidden' },
+  setRow: { paddingHorizontal: Spacing.md, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)', overflow: 'hidden' },
+  setRowMain: { flexDirection: 'row', alignItems: 'center' },
   setRowPR: { borderBottomColor: 'rgba(201,168,76,0.1)' },
+  ghostCaption: { fontFamily: Fonts.body, fontSize: 10, color: Colors.textDim, marginTop: 4, letterSpacing: 0.3 },
+  ghostCaptionAhead: { color: '#4CAF50' },
+  ghostCaptionBehind: { color: 'rgba(224,80,80,0.8)' },
   setCell: { fontFamily: Fonts.subheading, fontSize: 14, color: Colors.text, textAlign: 'center' },
   setCellPR: { color: Colors.gold },
   prTag: { backgroundColor: Colors.goldMuted, borderWidth: 1, borderColor: Colors.goldBorder, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },

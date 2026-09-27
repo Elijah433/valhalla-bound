@@ -16,6 +16,7 @@ import {
   getMacroGoals, getTodayMacros, getTodayMeals, deleteMealLog, updateMealLog, getMealsForDateRange, type MealLog,
   logWeight, getLatestWeight, getWeightHistory, getWeightChange, getRecentWeightLogs, updateWeightLog, deleteWeightLog, type WeightPoint, type WeightLog,
   addProgressPhoto, getProgressPhotos, getProgressPhotoById, deleteProgressPhotoRecord, type ProgressPhoto,
+  logSleep, getLatestSleep, getSleepHistory, getSleepAverage, getRecentSleepLogs, updateSleepLog, deleteSleepLog, type SleepLog, type SleepPoint,
 } from '@/lib/db';
 import { useWarriorStore } from '@/lib/store';
 import { Colors, Fonts, Spacing, Radii } from '@/constants/theme';
@@ -24,25 +25,14 @@ const { width } = Dimensions.get('window');
 
 const PHOTOS_DIR = FileSystem.documentDirectory + 'progress_photos/';
 
-// The database may contain an absolute path written under a DIFFERENT
-// app container than the one currently running — this can happen when
-// switching between a dev/Xcode-run install and a distributed TestFlight
-// build, since iOS sometimes treats those as separate installations with
-// separate sandboxed storage, even though the underlying JS code and
-// SQLite data persist. Rather than trust photo.photo_uri directly (which
-// may point at a container that no longer exists), this always takes just
-// the filename and rebuilds the path using THIS install's current
-// documentDirectory — making photos resilient to that kind of container
-// mismatch going forward, for any photo added after this fix ships.
 function resolvePhotoUri(storedPath: string): string {
   const filename = storedPath.split('/').pop();
   return PHOTOS_DIR + filename;
 }
 
-const WATER_INCREMENT = 8; // oz per tap
+const WATER_INCREMENT = 8;
 const WATER_KEY = 'mead_hall_water';
 
-// ── MEAL SVG ICONS ──────────────────────────────────────────
 function SunriseIcon({ size = 24, color = Colors.gold }: { size?: number; color?: string }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24">
@@ -97,8 +87,6 @@ function ProRuneIcon({ size = 22, color = Colors.gold }: { size?: number; color?
   );
 }
 
-// Simple rising/falling weight rune used on the trend card — a plain
-// triangle pointing the direction of the trend, tinted per direction.
 function TrendArrowIcon({ size = 14, color = Colors.gold, down = true }: { size?: number; color?: string; down?: boolean }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" style={{ transform: [{ rotate: down ? '0deg' : '180deg' }] }}>
@@ -107,7 +95,6 @@ function TrendArrowIcon({ size = 14, color = Colors.gold, down = true }: { size?
   );
 }
 
-// ── MEAL TYPE CONFIG ─────────────────────────────────────────
 const MEAL_TYPES = [
   { key: 'morning', label: 'Breakfast', sub: 'Morning Raid', color: '#E0A020', Icon: SunriseIcon },
   { key: 'midday', label: 'Lunch', sub: 'Midday Feast', color: Colors.gold, Icon: ShieldIcon },
@@ -121,7 +108,6 @@ const MACROS = [
   { key: 'fat', label: 'Fat', sub: 'Fuel', color: '#8B6FD4', rune: 'ᚱ', unit: 'g' },
 ];
 
-// ── MACRO RING ───────────────────────────────────────────────
 function MacroRing({ value, goal, color, label, sub, rune, unit, delay }: {
   value: number; goal: number; color: string; label: string;
   sub: string; rune: string; unit: string; delay: number;
@@ -173,7 +159,6 @@ function MacroRing({ value, goal, color, label, sub, rune, unit, delay }: {
   );
 }
 
-// ── MACRO SPLIT DONUT ────────────────────────────────────────
 function MacroSplitDonut({ protein, carbs, fat }: { protein: number; carbs: number; fat: number }) {
   const total = protein * 4 + carbs * 4 + fat * 9;
   const size = 120;
@@ -240,7 +225,6 @@ function MacroSplitDonut({ protein, carbs, fat }: { protein: number; carbs: numb
   );
 }
 
-// ── WEEKLY HISTORY BAR ────────────────────────────────────────
 function WeeklyHistoryBar({ data, goalCalories }: {
   data: { date: string; macros: { calories: number; protein: number; carbs: number; fat: number } }[];
   goalCalories: number;
@@ -291,13 +275,13 @@ function WeeklyHistoryBar({ data, goalCalories }: {
   );
 }
 
-// ── WEIGHT TREND GRAPH ────────────────────────────────────────
-// Renders a simple SVG line connecting each day that has a logged weight,
-// skipping gaps rather than interpolating through them (a straight line
-// across missing days would visually claim data that doesn't exist).
-function WeightTrendGraph({ data }: { data: WeightPoint[] }) {
-  const w = width - Spacing.lg * 2 - Spacing.lg * 2;
-  const h = 70;
+function WeightTrendGraph({ data, compact = false }: { data: WeightPoint[]; compact?: boolean }) {
+  // Compact mode fits the graph inside a half-width card (side-by-side
+  // with Sleep), instead of assuming it spans the full screen width.
+  const w = compact
+    ? (width - Spacing.lg * 2 - 10) / 2 - Spacing.md * 2
+    : width - Spacing.lg * 2 - Spacing.lg * 2;
+  const h = compact ? 50 : 70;
   const padding = 6;
 
   const points = data
@@ -307,19 +291,15 @@ function WeightTrendGraph({ data }: { data: WeightPoint[] }) {
   if (points.length === 0) {
     return (
       <View style={[styles.weightGraphEmpty, { width: w, height: h }]}>
-        <Text style={styles.weightGraphEmptyText}>No weigh-ins yet — log your first below</Text>
+        <Text style={styles.weightGraphEmptyText}>{compact ? 'No weigh-ins yet' : 'No weigh-ins yet — log your first below'}</Text>
       </View>
     );
   }
 
-  // A trend line needs at least two points to mean anything — a single dot
-  // would render as a nearly-invisible 3px mark somewhere in the corner of
-  // the chart, which looks identical to "the graph is broken." Show a
-  // clear message instead until there's a second day to actually connect.
   if (points.length === 1) {
     return (
       <View style={[styles.weightGraphEmpty, { width: w, height: h }]}>
-        <Text style={styles.weightGraphEmptyText}>One entry logged — check back tomorrow to see your trend begin</Text>
+        <Text style={styles.weightGraphEmptyText}>{compact ? 'One entry logged' : 'One entry logged — check back tomorrow to see your trend begin'}</Text>
       </View>
     );
   }
@@ -327,39 +307,37 @@ function WeightTrendGraph({ data }: { data: WeightPoint[] }) {
   const weights = points.map(p => p.weight);
   const minW = Math.min(...weights);
   const maxW = Math.max(...weights);
-  const range = Math.max(maxW - minW, 1); // avoid divide-by-zero when flat
+  const range = Math.max(maxW - minW, 1);
 
-  const xFor = (i: number) => padding + (i / (data.length - 1)) * (w - padding * 2);
+  // Spreads whatever points ARE logged evenly across the full width,
+  // rather than anchoring each point to its absolute day position in
+  // the 30-day window. Anchoring to absolute day caused sparse or
+  // recent-only logging to bunch every point near one edge, with the
+  // rest of the graph sitting empty — this way the line always uses
+  // the full width, however many or few points actually exist.
+  const xFor = (idx: number, total: number) => padding + (idx / Math.max(total - 1, 1)) * (w - padding * 2);
   const yFor = (weight: number) => h - padding - ((weight - minW) / range) * (h - padding * 2);
 
-  // Build one continuous path per unbroken run of consecutive logged days,
-  // so a gap in logging shows as a real visual break, not a straight
-  // "interpolated" line jumping across missing data.
-  const segments: { i: number; weight: number }[][] = [];
-  let current: { i: number; weight: number }[] = [];
-  points.forEach((p, idx) => {
-    if (idx > 0 && p.i !== points[idx - 1].i + 1) {
-      if (current.length) segments.push(current);
-      current = [];
-    }
-    current.push(p);
-  });
-  if (current.length) segments.push(current);
+  // Connect every logged point into one continuous line, regardless of
+  // gaps between them — most people don't log every single day, and
+  // breaking the line on every missed day made the graph look like
+  // scattered dots instead of a real trend.
+  const segments: { i: number; weight: number }[][] = [points];
 
   return (
     <Svg width={w} height={h}>
       {segments.map((seg, si) => {
         if (seg.length === 1) {
           return (
-            <Circle key={si} cx={xFor(seg[0].i)} cy={yFor(seg[0].weight)} r={3} fill={Colors.gold} />
+            <Circle key={si} cx={xFor(0, seg.length)} cy={yFor(seg[0].weight)} r={3} fill={Colors.gold} />
           );
         }
-        const d = seg.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${xFor(p.i)} ${yFor(p.weight)}`).join(' ');
+        const d = seg.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${xFor(idx, seg.length)} ${yFor(p.weight)}`).join(' ');
         return (
           <G key={si}>
             <Path d={d} stroke={Colors.gold} strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round" />
             {seg.map((p, pi) => (
-              <Circle key={pi} cx={xFor(p.i)} cy={yFor(p.weight)} r={pi === seg.length - 1 ? 3.5 : 2} fill={Colors.gold} />
+              <Circle key={pi} cx={xFor(pi, seg.length)} cy={yFor(p.weight)} r={pi === seg.length - 1 ? 3.5 : 2} fill={Colors.gold} />
             ))}
           </G>
         );
@@ -368,7 +346,70 @@ function WeightTrendGraph({ data }: { data: WeightPoint[] }) {
   );
 }
 
-// ── SCREEN ───────────────────────────────────────────────────
+// Same day-filling / gap-aware rendering as WeightTrendGraph — one point
+// per day in the window, null where nothing was logged, real visual
+// breaks in the line rather than a misleading interpolation across gaps.
+function SleepTrendGraph({ data, compact = false }: { data: SleepPoint[]; compact?: boolean }) {
+  const w = compact
+    ? (width - Spacing.lg * 2 - 10) / 2 - Spacing.md * 2
+    : width - Spacing.lg * 2 - Spacing.lg * 2;
+  const h = compact ? 50 : 70;
+  const padding = 6;
+
+  const points = data
+    .map((p, i) => ({ i, hours: p.hours }))
+    .filter(p => p.hours !== null) as { i: number; hours: number }[];
+
+  if (points.length === 0) {
+    return (
+      <View style={[styles.weightGraphEmpty, { width: w, height: h }]}>
+        <Text style={styles.weightGraphEmptyText}>{compact ? 'No sleep logged yet' : 'No sleep logged yet — log your first below'}</Text>
+      </View>
+    );
+  }
+
+  if (points.length === 1) {
+    return (
+      <View style={[styles.weightGraphEmpty, { width: w, height: h }]}>
+        <Text style={styles.weightGraphEmptyText}>{compact ? 'One night logged' : 'One night logged — check back tomorrow to see your trend begin'}</Text>
+      </View>
+    );
+  }
+
+  const hoursVals = points.map(p => p.hours);
+  const minH = Math.min(...hoursVals);
+  const maxH = Math.max(...hoursVals);
+  const range = Math.max(maxH - minH, 1);
+
+  const xFor = (idx: number, total: number) => padding + (idx / Math.max(total - 1, 1)) * (w - padding * 2);
+  const yFor = (hrs: number) => h - padding - ((hrs - minH) / range) * (h - padding * 2);
+
+  // Connect every logged point into one continuous line, regardless of
+  // gaps between them — same fix as WeightTrendGraph above.
+  const segments: { i: number; hours: number }[][] = [points];
+
+  return (
+    <Svg width={w} height={h}>
+      {segments.map((seg, si) => {
+        if (seg.length === 1) {
+          return (
+            <Circle key={si} cx={xFor(0, seg.length)} cy={yFor(seg[0].hours)} r={3} fill="#8B6FD4" />
+          );
+        }
+        const d = seg.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${xFor(idx, seg.length)} ${yFor(p.hours)}`).join(' ');
+        return (
+          <G key={si}>
+            <Path d={d} stroke="#8B6FD4" strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            {seg.map((p, pi) => (
+              <Circle key={pi} cx={xFor(pi, seg.length)} cy={yFor(p.hours)} r={pi === seg.length - 1 ? 3.5 : 2} fill="#8B6FD4" />
+            ))}
+          </G>
+        );
+      })}
+    </Svg>
+  );
+}
+
 export default function MeadHallScreen() {
   const { isPro } = useWarriorStore();
 
@@ -386,15 +427,19 @@ export default function MeadHallScreen() {
   const [photos, setPhotos] = useState<ProgressPhoto[]>([]);
   const [previewPhoto, setPreviewPhoto] = useState<ProgressPhoto | null>(null);
 
-  // Weight log history (edit/delete) — a separate list from the
-  // aggregated-by-day weightHistory used for the trend graph, since
-  // editing/deleting needs the real per-entry database id.
+  // Sleep — same shape as weight tracking above: latest entry, a rolling
+  // trend, and an inline log form.
+  const [sleepHistory, setSleepHistory] = useState<SleepPoint[]>([]);
+  const [latestSleep, setLatestSleep] = useState<SleepLog | null>(null);
+  const [sleepAverage, setSleepAverage] = useState<number | null>(null);
+  const [showSleepInput, setShowSleepInput] = useState(false);
+  const [sleepInput, setSleepInput] = useState('');
+
   const [showWeightLogList, setShowWeightLogList] = useState(false);
   const [weightLogs, setWeightLogs] = useState<WeightLog[]>([]);
   const [editingWeightLogId, setEditingWeightLogId] = useState<number | null>(null);
   const [editWeightValue, setEditWeightValue] = useState('');
 
-  // Meal edit-in-place
   const [editingMeal, setEditingMeal] = useState<MealLog | null>(null);
   const [editFoodName, setEditFoodName] = useState('');
   const [editCalories, setEditCalories] = useState('');
@@ -424,6 +469,10 @@ export default function MeadHallScreen() {
     setWeightLogs(getRecentWeightLogs(20));
     setPhotos(getProgressPhotos(30));
 
+    setLatestSleep(getLatestSleep());
+    setSleepHistory(getSleepHistory(30));
+    setSleepAverage(getSleepAverage(7));
+
     try {
       const raw = await AsyncStorage.getItem(WATER_KEY);
       if (raw) {
@@ -435,11 +484,6 @@ export default function MeadHallScreen() {
     } catch (e) {}
   }
 
-  // Water goal and headroom ceiling now come from the customizable goal
-  // instead of a hardcoded constant — ceiling scales at 1.5x whatever the
-  // person's actual goal is, so someone with a much higher or lower goal
-  // than the old fixed 128oz still gets sensible headroom above their
-  // target rather than an arbitrary fixed number.
   const waterGoal = goals.water_goal_oz;
   const waterMax = Math.round(waterGoal * 1.5);
 
@@ -464,7 +508,6 @@ export default function MeadHallScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   }
 
-  // Opens the edit form pre-filled with this meal's current values.
   function openEditMeal(meal: MealLog) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setEditingMeal(meal);
@@ -503,7 +546,17 @@ export default function MeadHallScreen() {
     loadData();
   }
 
-  // Opens inline editing for a specific weight log entry.
+  function handleLogSleep() {
+    const val = parseFloat(sleepInput);
+    if (!val || val <= 0 || val > 24) return;
+    logSleep(val);
+    setSleepInput('');
+    setShowSleepInput(false);
+    Keyboard.dismiss();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    loadData();
+  }
+
   function startEditWeightLog(log: WeightLog) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setEditingWeightLogId(log.id);
@@ -541,10 +594,6 @@ export default function MeadHallScreen() {
     loadData();
   }
 
-  // Progress photos never leave the device — the picker result is copied
-  // into this app's private local document directory, and only that local
-  // file path is ever stored (in SQLite, via addProgressPhoto). Nothing
-  // here touches Supabase or any network call.
   async function pickAndSavePhoto(source: 'camera' | 'library') {
     try {
       let result: ImagePicker.ImagePickerResult;
@@ -637,6 +686,35 @@ export default function MeadHallScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Weekly log streak — reuses weeklyData already fetched for the
+              calorie history further down. A day counts as "logged" if any
+              calories were recorded that day, regardless of amount — this
+              row is about consistency, not quantity, same idea as the
+              7-circle habit row seen in other tracking apps. */}
+          <View style={styles.logStreakRow}>
+            <LinearGradient colors={['rgba(201,168,76,0.05)', 'transparent']} style={StyleSheet.absoluteFill} />
+            {weeklyData.map((d, i) => {
+              const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+              const dateObj = new Date();
+              dateObj.setDate(dateObj.getDate() - (weeklyData.length - 1 - i));
+              const dayLabel = dayLabels[dateObj.getDay()];
+              const logged = d.macros.calories > 0;
+              const isToday = i === weeklyData.length - 1;
+              return (
+                <View key={i} style={styles.logStreakCol}>
+                  <View style={[
+                    styles.logStreakDot,
+                    logged && styles.logStreakDotFilled,
+                    isToday && !logged && styles.logStreakDotToday,
+                  ]}>
+                    {logged && <Text style={styles.logStreakDotRune}>ᚦ</Text>}
+                  </View>
+                  <Text style={[styles.logStreakDayLabel, isToday && { color: Colors.gold }]}>{dayLabel}</Text>
+                </View>
+              );
+            })}
+          </View>
+
           <Text style={styles.sectionLabel}>NUTRITION</Text>
 
           {/* Calorie bar */}
@@ -658,7 +736,7 @@ export default function MeadHallScreen() {
                     {Math.round(macros.calories)}
                   </Text>
                   <Text style={styles.calOf}> / {goals.calories}</Text>
-                  <Text style={styles.calUnit}> kcal</Text>
+                  <Text style={styles.calUnit}> cal</Text>
                 </View>
               </View>
               <View style={styles.calPctWrap}>
@@ -677,8 +755,8 @@ export default function MeadHallScreen() {
             </View>
             <Text style={styles.calSub}>
               {calOver
-                ? `${Math.round(macros.calories - goals.calories)} kcal over limit`
-                : `${Math.round(goals.calories - macros.calories)} kcal remaining`}
+                ? `${Math.round(macros.calories - goals.calories)} cal over limit`
+                : `${Math.round(goals.calories - macros.calories)} cal remaining`}
             </Text>
           </View>
 
@@ -701,7 +779,6 @@ export default function MeadHallScreen() {
 
           {/* Macro split donut + water tracking side by side */}
           <View style={styles.splitWaterRow}>
-            {/* Macro split donut */}
             <View style={styles.splitCard}>
               <LinearGradient colors={['rgba(255,255,255,0.02)', 'transparent']} style={StyleSheet.absoluteFill} />
               <Text style={styles.splitCardTitle}>MACRO SPLIT</Text>
@@ -721,7 +798,6 @@ export default function MeadHallScreen() {
               </View>
             </View>
 
-            {/* Water tracking */}
             <View style={styles.waterCard}>
               <LinearGradient colors={['rgba(91,163,199,0.06)', 'transparent']} style={StyleSheet.absoluteFill} />
               <Text style={styles.waterTitle}>WATER</Text>
@@ -750,109 +826,63 @@ export default function MeadHallScreen() {
             </View>
           </View>
 
-          <Text style={styles.sectionLabel}>BODY PROGRESS</Text>
-
-          {/* Body weight trend */}
-          <View style={styles.weightCard}>
-            <LinearGradient colors={['rgba(139,111,212,0.05)', 'transparent']} style={StyleSheet.absoluteFill} />
-            <LinearGradient
-              colors={['transparent', '#8B6FD4', 'transparent']}
-              style={styles.weightTopLine}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-            />
-            <View style={styles.weightHeader}>
-              <View>
-                <Text style={styles.weightEyebrow}>BODY WEIGHT</Text>
-                {latestWeight !== null ? (
-                  <View style={styles.weightNumRow}>
-                    <Text style={styles.weightNum}>{latestWeight}</Text>
-                    <Text style={styles.weightUnit}>lbs</Text>
-                  </View>
-                ) : (
-                  <Text style={styles.weightEmptyNum}>— lbs</Text>
-                )}
-              </View>
-              <View style={{ alignItems: 'flex-end', gap: 6 }}>
-                {weightChange !== null && (
-                  <View style={styles.weightChangeWrap}>
-                    <TrendArrowIcon size={12} color={weightChange < 0 ? '#4CAF50' : weightChange > 0 ? Colors.blood : Colors.textMuted} down={weightChange < 0} />
-                    <Text style={[styles.weightChangeText, {
-                      color: weightChange < 0 ? '#4CAF50' : weightChange > 0 ? Colors.blood : Colors.textMuted,
-                    }]}>
-                      {Math.abs(weightChange).toFixed(1)} lbs / 30d
-                    </Text>
-                  </View>
-                )}
-                {weightLogs.length > 0 && (
-                  <TouchableOpacity onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowWeightLogList(true); }}>
-                    <Text style={styles.weightHistoryLink}>Edit entries →</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
+          {/* Recipe Ideas — links out to a dedicated screen with real
+              recipe search (Spoonacular), filterable by diet/macros.
+              Sits here rather than being buried in settings since this is
+              exactly the moment someone's thinking about food. */}
+          <TouchableOpacity
+            style={styles.recipeIdeasCard}
+            onPress={() => {
+              if (!isPro) { router.push('/(modals)/paywall'); return; }
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.push('/(modals)/recipe-ideas' as any);
+            }}
+            activeOpacity={0.85}
+          >
+            <LinearGradient colors={['rgba(224,80,32,0.06)', 'transparent']} style={StyleSheet.absoluteFill} />
+            <LinearGradient colors={['transparent', '#E05020', 'transparent']} style={styles.recipeIdeasTopLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+            <View style={styles.recipeIdeasIconWrap}>
+              <Text style={styles.recipeIdeasIcon}>ᛗ</Text>
             </View>
-
-            <WeightTrendGraph data={weightHistory} />
-
-            {showWeightInput ? (
-              <View style={styles.weightInputRow}>
-                <TextInput
-                  style={styles.weightInput}
-                  value={weightInput}
-                  onChangeText={setWeightInput}
-                  placeholder="Weight"
-                  placeholderTextColor={Colors.textDim}
-                  keyboardType="decimal-pad"
-                  autoFocus
-                  returnKeyType="done"
-                  onSubmitEditing={handleLogWeight}
-                />
-                <Text style={styles.weightInputUnit}>lbs</Text>
-                <TouchableOpacity style={styles.weightLogBtn} onPress={handleLogWeight}>
-                  <Text style={styles.weightLogBtnText}>Log</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.weightCancelBtn} onPress={() => { setShowWeightInput(false); setWeightInput(''); Keyboard.dismiss(); }}>
-                  <Text style={styles.weightCancelBtnText}>✕</Text>
-                </TouchableOpacity>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.recipeIdeasTitle}>Recipe Ideas</Text>
+              <Text style={styles.recipeIdeasSub}>High protein, vegan, low carb & more</Text>
+            </View>
+            {!isPro && (
+              <View style={styles.featureProBadge}>
+                <Text style={styles.featureProBadgeText}>PRO</Text>
               </View>
-            ) : (
-              <TouchableOpacity style={styles.weightLogPrompt} onPress={() => setShowWeightInput(true)} activeOpacity={0.85}>
-                <Text style={styles.weightLogPromptText}>+ Log Today's Weight</Text>
-              </TouchableOpacity>
             )}
-          </View>
+            <Text style={styles.recipeIdeasArrow}>→</Text>
+          </TouchableOpacity>
 
-          {/* Progress photos — thumbnails stored and read entirely from the
-              device's local file system; nothing here ever touches the
-              network. Tapping a thumbnail opens the full-screen preview
-              modal below, where deletion also lives. */}
-          <View style={styles.photosCard}>
-            <LinearGradient colors={['rgba(139,111,212,0.04)', 'transparent']} style={StyleSheet.absoluteFill} />
-            <Text style={styles.photosTitle}>PROGRESS PHOTOS</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photosRow}>
-              <TouchableOpacity style={styles.photoAddTile} onPress={promptAddPhoto} activeOpacity={0.8}>
-                <Text style={styles.photoAddPlus}>+</Text>
-                <Text style={styles.photoAddLabel}>Add</Text>
-              </TouchableOpacity>
-              {photos.map((photo) => (
-                <TouchableOpacity
-                  key={photo.id}
-                  style={styles.photoThumbWrap}
-                  onPress={() => setPreviewPhoto(photo)}
-                  activeOpacity={0.85}
-                >
-                  <Image source={{ uri: resolvePhotoUri(photo.photo_uri) }} style={styles.photoThumb} />
-                  <Text style={styles.photoThumbDate}>
-                    {new Date(photo.created_at.replace(' ', 'T') + 'Z').toLocaleDateString([], { month: 'short', day: 'numeric' })}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-              {photos.length === 0 && (
-                <View style={styles.photosEmptyHint}>
-                  <Text style={styles.photosEmptyHintText}>Your first photo starts the timeline</Text>
-                </View>
-              )}
-            </ScrollView>
-          </View>
+          {/* Intermittent Fasting — links to its own dedicated timer
+              screen, same pattern as Recipe Ideas above. */}
+          <TouchableOpacity
+            style={styles.fastingCard}
+            onPress={() => {
+              if (!isPro) { router.push('/(modals)/paywall'); return; }
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.push('/(modals)/fasting' as any);
+            }}
+            activeOpacity={0.85}
+          >
+            <LinearGradient colors={['rgba(139,111,212,0.06)', 'transparent']} style={StyleSheet.absoluteFill} />
+            <LinearGradient colors={['transparent', '#8B6FD4', 'transparent']} style={styles.fastingTopLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+            <View style={styles.fastingIconWrap}>
+              <Text style={styles.fastingIcon}>ᛁ</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.fastingTitle}>Intermittent Fasting</Text>
+              <Text style={styles.fastingSub}>Track your eating window</Text>
+            </View>
+            {!isPro && (
+              <View style={styles.featureProBadge}>
+                <Text style={styles.featureProBadgeText}>PRO</Text>
+              </View>
+            )}
+            <Text style={styles.fastingArrow}>→</Text>
+          </TouchableOpacity>
 
           {/* Meal sections */}
           <Text style={styles.sectionLabel}>TODAY'S MEALS</Text>
@@ -876,7 +906,7 @@ export default function MeadHallScreen() {
                   </View>
                   <View style={styles.mealHeaderRight}>
                     {typeCals > 0 && (
-                      <Text style={[styles.mealCals, { color: mealType.color }]} numberOfLines={1}>{typeCals} kcal</Text>
+                      <Text style={[styles.mealCals, { color: mealType.color }]} numberOfLines={1}>{typeCals} cal</Text>
                     )}
                     <TouchableOpacity
                       style={[styles.scanBtn, { borderColor: `${mealType.color}40`, backgroundColor: `${mealType.color}08` }]}
@@ -909,7 +939,7 @@ export default function MeadHallScreen() {
                     <View style={styles.mealRowInfo}>
                       <Text style={styles.mealRowName} numberOfLines={1}>{meal.food_name}</Text>
                       <Text style={styles.mealRowMacros}>
-                        {meal.calories} kcal · {Math.round(meal.protein)}P · {Math.round(meal.carbs)}C · {Math.round(meal.fat)}F
+                        {meal.calories} cal · {Math.round(meal.protein)}P · {Math.round(meal.carbs)}C · {Math.round(meal.fat)}F
                       </Text>
                     </View>
                     <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete(meal.id)}>
@@ -930,7 +960,150 @@ export default function MeadHallScreen() {
             );
           })}
 
-          {/* 7-day calorie history — at the bottom so daily logging is the primary focus */}
+          {/* 7-day calorie history */}
+          <Text style={styles.sectionLabel}>BODY PROGRESS</Text>
+
+          {/* Body weight + Sleep — compact side-by-side cards instead of
+              two stacked full-width blocks, same visual density as the
+              macro-split + water row above. Log forms expand full-width
+              below the row rather than being squeezed into a half card. */}
+          <View style={styles.bodyStatsRow}>
+            <View style={styles.compactStatCard}>
+              <LinearGradient colors={['rgba(139,111,212,0.05)', 'transparent']} style={StyleSheet.absoluteFill} />
+              <LinearGradient colors={['transparent', '#8B6FD4', 'transparent']} style={styles.weightTopLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+              <Text style={styles.compactStatEyebrow}>BODY WEIGHT</Text>
+              {latestWeight !== null ? (
+                <View style={styles.compactStatNumRow}>
+                  <Text style={styles.compactStatNum}>{latestWeight}</Text>
+                  <Text style={styles.compactStatUnit}>lbs</Text>
+                </View>
+              ) : (
+                <Text style={styles.compactStatEmptyNum}>— lbs</Text>
+              )}
+              {weightChange !== null && (
+                <View style={styles.compactStatChangeWrap}>
+                  <TrendArrowIcon size={10} color={weightChange < 0 ? '#4CAF50' : weightChange > 0 ? Colors.blood : Colors.textMuted} down={weightChange < 0} />
+                  <Text style={[styles.compactStatChangeText, {
+                    color: weightChange < 0 ? '#4CAF50' : weightChange > 0 ? Colors.blood : Colors.textMuted,
+                  }]}>
+                    {Math.abs(weightChange).toFixed(1)} / 30d
+                  </Text>
+                </View>
+              )}
+              <WeightTrendGraph data={weightHistory} compact />
+              <TouchableOpacity style={styles.compactLogBtn} onPress={() => setShowWeightInput(!showWeightInput)} activeOpacity={0.85}>
+                <Text style={styles.compactLogBtnText}>{showWeightInput ? '✕ Cancel' : '+ Log'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.compactStatCard}>
+              <LinearGradient colors={['rgba(139,111,212,0.05)', 'transparent']} style={StyleSheet.absoluteFill} />
+              <LinearGradient colors={['transparent', '#8B6FD4', 'transparent']} style={styles.weightTopLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+              <Text style={styles.compactStatEyebrow}>SLEEP</Text>
+              {latestSleep !== null ? (
+                <View style={styles.compactStatNumRow}>
+                  <Text style={styles.compactStatNum}>{latestSleep.hours}</Text>
+                  <Text style={styles.compactStatUnit}>hrs</Text>
+                </View>
+              ) : (
+                <Text style={styles.compactStatEmptyNum}>— hrs</Text>
+              )}
+              {sleepAverage !== null && (
+                <View style={styles.compactStatChangeWrap}>
+                  <Text style={styles.compactStatChangeText}>{sleepAverage} avg / 7d</Text>
+                </View>
+              )}
+              <SleepTrendGraph data={sleepHistory} compact />
+              <TouchableOpacity style={styles.compactLogBtn} onPress={() => setShowSleepInput(!showSleepInput)} activeOpacity={0.85}>
+                <Text style={styles.compactLogBtnText}>{showSleepInput ? '✕ Cancel' : '+ Log'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Expanded log forms — render full-width below the compact
+              row for whichever one is currently active, rather than
+              cramming an input row into a half-width card. */}
+          {showWeightInput && (
+            <View style={styles.expandedLogForm}>
+              <Text style={styles.expandedLogFormLabel}>LOG TODAY'S WEIGHT</Text>
+              <View style={styles.weightInputRow}>
+                <TextInput
+                  style={styles.weightInput}
+                  value={weightInput}
+                  onChangeText={setWeightInput}
+                  placeholder="Weight"
+                  placeholderTextColor={Colors.textDim}
+                  keyboardType="decimal-pad"
+                  autoFocus
+                  returnKeyType="done"
+                  onSubmitEditing={handleLogWeight}
+                />
+                <Text style={styles.weightInputUnit}>lbs</Text>
+                <TouchableOpacity style={styles.weightLogBtn} onPress={handleLogWeight}>
+                  <Text style={styles.weightLogBtnText}>Log</Text>
+                </TouchableOpacity>
+              </View>
+              {weightLogs.length > 0 && (
+                <TouchableOpacity onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowWeightLogList(true); }}>
+                  <Text style={styles.weightHistoryLink}>Edit past entries →</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          {showSleepInput && (
+            <View style={styles.expandedLogForm}>
+              <Text style={styles.expandedLogFormLabel}>LOG LAST NIGHT'S SLEEP</Text>
+              <View style={styles.weightInputRow}>
+                <TextInput
+                  style={styles.weightInput}
+                  value={sleepInput}
+                  onChangeText={setSleepInput}
+                  placeholder="Hours"
+                  placeholderTextColor={Colors.textDim}
+                  keyboardType="decimal-pad"
+                  autoFocus
+                  returnKeyType="done"
+                  onSubmitEditing={handleLogSleep}
+                />
+                <Text style={styles.weightInputUnit}>hrs</Text>
+                <TouchableOpacity style={styles.weightLogBtn} onPress={handleLogSleep}>
+                  <Text style={styles.weightLogBtnText}>Log</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {/* Progress photos */}
+          <View style={styles.photosCard}>
+            <LinearGradient colors={['rgba(139,111,212,0.04)', 'transparent']} style={StyleSheet.absoluteFill} />
+            <Text style={styles.photosTitle}>PROGRESS PHOTOS</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photosRow}>
+              <TouchableOpacity style={styles.photoAddTile} onPress={promptAddPhoto} activeOpacity={0.8}>
+                <Text style={styles.photoAddPlus}>+</Text>
+                <Text style={styles.photoAddLabel}>Add</Text>
+              </TouchableOpacity>
+              {photos.map((photo) => (
+                <TouchableOpacity
+                  key={photo.id}
+                  style={styles.photoThumbWrap}
+                  onPress={() => setPreviewPhoto(photo)}
+                  activeOpacity={0.85}
+                >
+                  <Image source={{ uri: resolvePhotoUri(photo.photo_uri) }} style={styles.photoThumb} />
+                  <Text style={styles.photoThumbDate}>
+                    {new Date(photo.created_at.replace(' ', 'T') + 'Z').toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              {photos.length === 0 && (
+                <View style={styles.photosEmptyHint}>
+                  <Text style={styles.photosEmptyHintText}>Your first photo starts the timeline</Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+
           <Text style={styles.sectionLabel}>HISTORY</Text>
           <WeeklyHistoryBar data={weeklyData} goalCalories={goals.calories} />
 
@@ -955,7 +1128,7 @@ export default function MeadHallScreen() {
         </Animated.ScrollView>
       </SafeAreaView>
 
-      {/* Full-screen photo preview — local file only, delete lives here */}
+      {/* Full-screen photo preview */}
       <Modal visible={!!previewPhoto} transparent animationType="fade" onRequestClose={() => setPreviewPhoto(null)}>
         <View style={styles.previewOverlay}>
           <TouchableOpacity style={styles.previewClose} onPress={() => setPreviewPhoto(null)}>
@@ -980,7 +1153,7 @@ export default function MeadHallScreen() {
         </View>
       </Modal>
 
-      {/* Weight log history — edit or delete any past entry */}
+      {/* Weight log history */}
       <Modal visible={showWeightLogList} transparent animationType="slide" onRequestClose={() => setShowWeightLogList(false)}>
         <View style={styles.weightListOverlay}>
           <View style={styles.weightListSheet}>
@@ -1092,7 +1265,7 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end',
-    paddingHorizontal: Spacing.lg, paddingTop: Spacing.md, paddingBottom: Spacing.lg,
+    paddingHorizontal: Spacing.lg, paddingTop: Spacing.md, paddingBottom: Spacing.md,
   },
   eyebrow: { fontFamily: Fonts.body, fontSize: 9, letterSpacing: 4, color: Colors.textMuted, marginBottom: 2 },
   title: { fontFamily: Fonts.heading, fontSize: 34, color: Colors.text, letterSpacing: 1 },
@@ -1101,6 +1274,27 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.goldBorder, backgroundColor: Colors.goldMuted, marginBottom: 4,
   },
   goalsBtnText: { fontFamily: Fonts.body, fontSize: 10, color: Colors.gold, letterSpacing: 1 },
+
+  logStreakRow: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    marginHorizontal: Spacing.lg, marginBottom: Spacing.lg,
+    borderWidth: 1, borderColor: 'rgba(201,168,76,0.1)', borderRadius: 14,
+    paddingVertical: 12, paddingHorizontal: 10, overflow: 'hidden',
+    backgroundColor: 'rgba(12,10,16,0.6)',
+  },
+  logStreakCol: { alignItems: 'center', gap: 5 },
+  logStreakDot: {
+    width: 22, height: 22, borderRadius: 6,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  logStreakDotFilled: {
+    borderColor: Colors.gold, backgroundColor: Colors.gold,
+  },
+  logStreakDotToday: { borderColor: 'rgba(201,168,76,0.35)', borderStyle: 'dashed' },
+  logStreakDotRune: { fontSize: 10, color: Colors.void, fontFamily: 'System' },
+  logStreakDayLabel: { fontFamily: Fonts.body, fontSize: 8, letterSpacing: 0.5, color: Colors.textDim },
 
   calCard: {
     marginHorizontal: Spacing.lg, marginBottom: Spacing.md,
@@ -1173,7 +1367,6 @@ const styles = StyleSheet.create({
   waterBtnAddText: { color: '#5BA3C7' },
   waterDone: { fontFamily: Fonts.body, fontSize: 9, letterSpacing: 1, color: '#5BA3C7', marginTop: 2 },
 
-  // Body weight
   weightCard: {
     marginHorizontal: Spacing.lg, marginBottom: Spacing.md,
     borderWidth: 1, borderColor: 'rgba(139,111,212,0.2)', borderRadius: 16,
@@ -1213,7 +1406,36 @@ const styles = StyleSheet.create({
   },
   weightCancelBtnText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.textMuted },
 
-  // Progress photos
+  bodyStatsRow: {
+    flexDirection: 'row', marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.sm, gap: 10,
+  },
+  compactStatCard: {
+    flex: 1, borderWidth: 1, borderColor: 'rgba(139,111,212,0.2)',
+    borderRadius: 16, padding: Spacing.md, overflow: 'hidden',
+    backgroundColor: 'rgba(12,10,16,0.85)', alignItems: 'center', gap: 6,
+  },
+  compactStatEyebrow: { fontFamily: Fonts.body, fontSize: 8, letterSpacing: 2, color: '#8B6FD4' },
+  compactStatNumRow: { flexDirection: 'row', alignItems: 'baseline', gap: 3 },
+  compactStatNum: { fontFamily: Fonts.heading, fontSize: 24, color: Colors.text },
+  compactStatUnit: { fontFamily: Fonts.prose, fontSize: 11, color: Colors.textMuted },
+  compactStatEmptyNum: { fontFamily: Fonts.heading, fontSize: 24, color: Colors.textDim },
+  compactStatChangeWrap: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  compactStatChangeText: { fontFamily: Fonts.body, fontSize: 9, color: Colors.textMuted },
+  compactLogBtn: {
+    borderWidth: 1, borderColor: 'rgba(139,111,212,0.3)', borderRadius: 8,
+    paddingVertical: 6, paddingHorizontal: 12, marginTop: 2,
+    backgroundColor: 'rgba(139,111,212,0.06)',
+  },
+  compactLogBtnText: { fontFamily: Fonts.subheading, fontSize: 10, color: '#8B6FD4' },
+
+  expandedLogForm: {
+    marginHorizontal: Spacing.lg, marginBottom: Spacing.md,
+    borderWidth: 1, borderColor: 'rgba(139,111,212,0.2)', borderRadius: 14,
+    padding: Spacing.md, backgroundColor: 'rgba(12,10,16,0.7)', gap: 8,
+  },
+  expandedLogFormLabel: { fontFamily: Fonts.body, fontSize: 9, letterSpacing: 2, color: '#8B6FD4' },
+
   photosCard: {
     marginHorizontal: Spacing.lg, marginBottom: Spacing.lg,
     borderWidth: 1, borderColor: 'rgba(139,111,212,0.15)', borderRadius: 16,
@@ -1241,7 +1463,50 @@ const styles = StyleSheet.create({
     fontStyle: 'italic', maxWidth: 160,
   },
 
-  // Photo preview modal
+  recipeIdeasCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginHorizontal: Spacing.lg, marginBottom: Spacing.lg,
+    borderWidth: 1, borderColor: 'rgba(224,80,32,0.2)', borderRadius: 16,
+    overflow: 'hidden', backgroundColor: 'rgba(12,10,16,0.85)',
+    paddingHorizontal: Spacing.md, paddingVertical: 12,
+  },
+  recipeIdeasTopLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 1 },
+  recipeIdeasIconWrap: {
+    width: 38, height: 38, borderRadius: 10,
+    borderWidth: 1, borderColor: 'rgba(224,80,32,0.25)',
+    backgroundColor: 'rgba(224,80,32,0.1)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  recipeIdeasIcon: { fontSize: 18, color: '#E05020', fontFamily: 'System' },
+  recipeIdeasTitle: { fontFamily: Fonts.heading, fontSize: 13, color: '#E05020', letterSpacing: 0.5, marginBottom: 2 },
+  recipeIdeasSub: { fontFamily: Fonts.prose, fontSize: 11, color: Colors.textMuted },
+  recipeIdeasArrow: { fontFamily: Fonts.heading, fontSize: 16, color: '#E05020', opacity: 0.6 },
+
+  fastingCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginHorizontal: Spacing.lg, marginBottom: Spacing.lg,
+    borderWidth: 1, borderColor: 'rgba(139,111,212,0.2)', borderRadius: 16,
+    overflow: 'hidden', backgroundColor: 'rgba(12,10,16,0.85)',
+    paddingHorizontal: Spacing.md, paddingVertical: 12,
+  },
+  fastingTopLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 1 },
+  fastingIconWrap: {
+    width: 38, height: 38, borderRadius: 10,
+    borderWidth: 1, borderColor: 'rgba(139,111,212,0.25)',
+    backgroundColor: 'rgba(139,111,212,0.1)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  fastingIcon: { fontSize: 18, color: '#8B6FD4', fontFamily: 'System' },
+  fastingTitle: { fontFamily: Fonts.heading, fontSize: 13, color: '#8B6FD4', letterSpacing: 0.5, marginBottom: 2 },
+  fastingSub: { fontFamily: Fonts.prose, fontSize: 11, color: Colors.textMuted },
+  fastingArrow: { fontFamily: Fonts.heading, fontSize: 16, color: '#8B6FD4', opacity: 0.6 },
+
+  featureProBadge: {
+    borderWidth: 1, borderColor: Colors.goldBorder, borderRadius: 4,
+    paddingHorizontal: 6, paddingVertical: 2, backgroundColor: Colors.goldMuted,
+  },
+  featureProBadgeText: { fontFamily: Fonts.body, fontSize: 8, color: Colors.gold, letterSpacing: 1 },
+
   previewOverlay: {
     flex: 1, backgroundColor: 'rgba(4,4,8,0.97)',
     alignItems: 'center', justifyContent: 'center', padding: Spacing.lg,
@@ -1263,7 +1528,6 @@ const styles = StyleSheet.create({
   },
   previewDeleteText: { fontFamily: Fonts.body, fontSize: 12, color: Colors.blood, letterSpacing: 0.5 },
 
-  // Weight log history & meal edit sheets — shared bottom-sheet look
   weightListOverlay: { flex: 1, backgroundColor: 'rgba(4,4,8,0.85)', justifyContent: 'flex-end' },
   weightListSheet: {
     backgroundColor: '#0C0A10', borderTopLeftRadius: 24, borderTopRightRadius: 24,
@@ -1291,7 +1555,6 @@ const styles = StyleSheet.create({
   weightListSaveBtn: { backgroundColor: '#8B6FD4', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
   weightListSaveBtnText: { fontFamily: Fonts.heading, fontSize: 11, color: Colors.void },
 
-  // Meal edit fields
   editFieldLabel: { fontFamily: Fonts.body, fontSize: 8, letterSpacing: 2, color: Colors.textMuted, marginBottom: 4 },
   editFieldInput: {
     fontFamily: Fonts.subheading, fontSize: 14, color: Colors.text,
@@ -1305,7 +1568,6 @@ const styles = StyleSheet.create({
   },
   editSaveBtnText: { fontFamily: Fonts.heading, fontSize: 13, color: Colors.void, letterSpacing: 1 },
 
-  // Weekly history
   weeklyCard: {
     marginHorizontal: Spacing.lg, marginBottom: Spacing.lg,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',

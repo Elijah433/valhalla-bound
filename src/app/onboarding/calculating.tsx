@@ -9,6 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WeaponSVG } from '../../components/WeaponSVG';
 import { useOnboardingStore } from '@/lib/onboarding-store';
 import { useWarriorStore } from '@/lib/store';
+import { requestPermissionsAndSchedule } from '@/lib/notifications';
 import { Colors, Fonts, Spacing } from '@/constants/theme';
 
 const { width, height } = Dimensions.get('window');
@@ -168,6 +169,19 @@ export default function CalculatingScreen() {
       // before it fires) would otherwise leave isComplete stuck at false.
       await markComplete();
 
+      // Ask for notification permission right as onboarding finishes —
+      // this is the one moment every new user passes through, so it's the
+      // only prompt guaranteed to reach 100% of new installs rather than
+      // sitting behind a settings screen nobody finds on their own.
+      // Deliberately not awaited: the OS permission dialog can appear
+      // while the reveal animation below plays, instead of delaying it.
+      requestPermissionsAndSchedule(
+        data.name ?? 'Warrior',
+        0,
+        false,
+        data.gender === 'shieldmaiden',
+      );
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
       Animated.parallel([
@@ -225,6 +239,16 @@ export default function CalculatingScreen() {
       if (data.gender) await AsyncStorage.setItem('valhalla_gender', data.gender);
       if (data.goal)   await AsyncStorage.setItem('valhalla_goal', data.goal);
       await markComplete();
+
+      // Same one-time permission ask as the automatic finish path above —
+      // this branch exists because someone can tap "Skip" before the
+      // timer-driven runFinish() ever gets a chance to run it.
+      requestPermissionsAndSchedule(
+        data.name ?? 'Warrior',
+        0,
+        false,
+        data.gender === 'shieldmaiden',
+      );
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 

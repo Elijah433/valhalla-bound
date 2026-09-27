@@ -10,7 +10,24 @@ Notifications.setNotificationHandler({
     shouldPlaySound: true,
     shouldSetBadge: false,
   }),
-});
+}); 
+
+// Whether this device has ever been shown the notification permission
+// prompt before — via onboarding, the one-time existing-user prompt on
+// launch, or the manual settings screen. Distinct from whether permission
+// was actually granted: iOS only shows its own system dialog once per
+// install regardless of how many times we call requestPermissionsAsync, so
+// this flag is what stops US from repeatedly trying to re-prompt someone
+// who already said no, not what determines the OS's behavior.
+const NOTIF_PROMPT_KEY = 'notif_permission_prompted';
+
+export async function hasBeenPromptedForPermission(): Promise<boolean> {
+  return (await AsyncStorage.getItem(NOTIF_PROMPT_KEY)) === 'true';
+}
+
+export async function markPermissionPrompted(): Promise<void> {
+  await AsyncStorage.setItem(NOTIF_PROMPT_KEY, 'true');
+}
 
 export async function requestNotificationPermissions(): Promise<boolean> {
   const { status: existing } = await Notifications.getPermissionsAsync();
@@ -233,6 +250,10 @@ export async function requestPermissionsAndSchedule(
   isShieldmaiden: boolean = false,
 ): Promise<boolean> {
   const granted = await requestNotificationPermissions();
+  // Record that we've asked regardless of the outcome — a decline still
+  // counts as "asked," so nothing re-triggers the onboarding or
+  // existing-user one-time prompts on a later launch.
+  await markPermissionPrompted();
   if (!granted) return false;
   await scheduleAllNotifications(warriorName, streakDays, trainedToday, isShieldmaiden);
   await AsyncStorage.setItem('notifications_scheduled', 'true');

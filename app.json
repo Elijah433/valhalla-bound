@@ -2,7 +2,7 @@
   "expo": {
     "name": "Valhalla Bound",
     "slug": "valhalla-bound",
-    "version": "1.9.0",
+    "version": "2.4.0",
     "orientation": "portrait",
     "icon": "./assets/images/valhalla.png",
     "scheme": "valhallabound",
@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.elijah.valhallabound",
-      "buildNumber": "34",
+      "buildNumber": "46",
       "infoPlist": {
         "NSCameraUsageDescription": "Valhalla Bound uses your camera to scan food barcodes and take progress photos for the Mead Hall.",
         "NSPhotoLibraryUsageDescription": "Valhalla Bound accesses your photo library so you can add progress photos, stored only on your device.",
@@ -50,7 +50,24 @@
           "sounds": []
         }
       ],
-      "./plugins/withFmtFix"
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Valhalla Bound uses your location in the background to track your run's distance, pace, and route even when your phone is locked or the app isn't in the foreground.",
+          "locationWhenInUsePermission": "Valhalla Bound uses your location to track your run's distance, pace, and route while the app is open.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
+        }
+      ],
+      "./plugins/withFmtFix",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "15.1"
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

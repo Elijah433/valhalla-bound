@@ -296,12 +296,28 @@ export function getWorkoutCount(): number {
   return row?.count ?? 0;
 }
 
+// Real distance (from cardio_routes) is used per-workout wherever it
+// exists — GPS-tracked runs and manually-typed distances alike. Any
+// endurance workout logged without one (blank DISTANCE field, or logged
+// before this feature existed) falls back to the old flat 3-mile estimate
+// instead, so this total doesn't suddenly drop for existing data the
+// moment real tracking ships — it just gets progressively more accurate
+// as more real distances get logged going forward.
 export function getTotalMiles(): number {
   const db = getDb();
-  const row = db.getFirstSync<{ count: number }>(
-    "SELECT COUNT(*) as count FROM workouts WHERE type = 'endurance'"
+  ensureCardioRoutesTable(db);
+  const rows = db.getAllSync<{ distance_meters: number | null }>(
+    `SELECT cr.distance_meters as distance_meters
+     FROM workouts w
+     LEFT JOIN cardio_routes cr ON cr.workout_id = w.id
+     WHERE w.type = 'endurance'`
   );
-  return (row?.count ?? 0) * 3;
+  const METERS_PER_MILE = 1609.344;
+  const totalMiles = rows.reduce(
+    (sum, row) => sum + (row.distance_meters != null ? row.distance_meters / METERS_PER_MILE : 3),
+    0
+  );
+  return Math.round(totalMiles * 10) / 10;
 }
 
 // ── Strength Sessions ──────────────────────────────────────────────
@@ -1086,4 +1102,555 @@ export function getWorkoutTypesThisWeek(): string[] {
   );
   const thisWeek = all.filter(w => utcTimestampToLocalDateString(w.created_at) >= weekStartStr);
   return Array.from(new Set(thisWeek.map(w => w.type)));
+}
+// ── BODY MEASUREMENTS ─────────────────────────────────────────
+// Same pattern as the existing weight-logging functions — a defensive
+// CREATE TABLE IF NOT EXISTS (safe to run on every launch), plus
+// log/read/update/delete functions mirroring logWeight/getLatestWeight/
+// updateWeightLog/deleteWeightLog exactly, so this feels consistent
+// with code that's already proven to work.
+
+export interface BodyMeasurement {
+  id: number;
+  chest: number | null;
+  waist: number | null;
+  hips: number | null;
+  arms: number | null;
+  thighs: number | null;
+  body_fat: number | null;
+  created_at: string;
+}
+
+// Call this once alongside your other table-creation calls (wherever
+// getDb() sets up the schema on first launch).
+function ensureMeasurementsTable(db: ReturnType<typeof getDb>) {
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS body_measurements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chest REAL,
+      waist REAL,
+      hips REAL,
+      arms REAL,
+      thighs REAL,
+      created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now'))
+    );
+  `);
+  // Migration: body_measurements gained a `body_fat` column after some
+  // installs already created the table without it — same defensive
+  // pattern as the custom_exercises/macro_goals migrations in initDb().
+  try {
+    db.execSync(`ALTER TABLE body_measurements ADD COLUMN body_fat REAL;`);
+  } catch (e) {
+    // Column already exists — expected on every launch after the first.
+  }
+}
+
+// Logs a new measurement entry. Pass null for any field you don't want
+// to record that day — someone might only measure their waist, not the
+// full set, and shouldn't be forced to fill in numbers they don't have.
+export function logMeasurement(
+  chest: number | null,
+  waist: number | null,
+  hips: number | null,
+  arms: number | null,
+  thighs: number | null,
+  bodyFat: number | null = null
+): number {
+  const db = getDb();
+  ensureMeasurementsTable(db);
+  const result = db.runSync(
+    `INSERT INTO body_measurements (chest, waist, hips, arms, thighs, body_fat) VALUES (?, ?, ?, ?, ?, ?)`,
+    [chest, waist, hips, arms, thighs, bodyFat]
+  );
+  return result.lastInsertRowId;
+}
+
+export function getLatestMeasurement(): BodyMeasurement | null {
+  const db = getDb();
+  ensureMeasurementsTable(db);
+  const rows = db.getAllSync<BodyMeasurement>(
+    `SELECT * FROM body_measurements ORDER BY created_at DESC LIMIT 1`
+  );
+  return rows[0] ?? null;
+}
+
+// Same "edit/delete history list" pattern as getRecentWeightLogs.
+export function getRecentMeasurementLogs(limit: number = 20): BodyMeasurement[] {
+  const db = getDb();
+  ensureMeasurementsTable(db);
+  return db.getAllSync<BodyMeasurement>(
+    `SELECT * FROM body_measurements ORDER BY created_at DESC LIMIT ?`,
+    [limit]
+  );
+}
+
+export function updateMeasurementLog(
+  id: number,
+  chest: number | null,
+  waist: number | null,
+  hips: number | null,
+  arms: number | null,
+  thighs: number | null,
+  bodyFat: number | null = null
+): void {
+  const db = getDb();
+  db.runSync(
+    `UPDATE body_measurements SET chest = ?, waist = ?, hips = ?, arms = ?, thighs = ?, body_fat = ? WHERE id = ?`,
+    [chest, waist, hips, arms, thighs, bodyFat, id]
+  );
+}
+
+export function deleteMeasurementLog(id: number): void {
+  const db = getDb();
+  db.runSync(`DELETE FROM body_measurements WHERE id = ?`, [id]);
+}
+
+// Returns the change in each measurement over the given number of days,
+// comparing the latest entry to the oldest entry within that window —
+// same convention as getWeightChange(30), just per-field instead of a
+// single number. Returns null for any field where there isn't enough
+// data yet to compute a real change.
+export function getMeasurementChange(days: number = 30): Record<string, number | null> {
+  const db = getDb();
+  ensureMeasurementsTable(db);
+  const rows = db.getAllSync<BodyMeasurement>(
+    `SELECT * FROM body_measurements WHERE created_at >= datetime('now', ?) ORDER BY created_at ASC`,
+    [`-${days} days`]
+  );
+  if (rows.length < 2) {
+    return { chest: null, waist: null, hips: null, arms: null, thighs: null, body_fat: null };
+  }
+  const oldest = rows[0];
+  const latest = rows[rows.length - 1];
+  const fields: (keyof BodyMeasurement)[] = ['chest', 'waist', 'hips', 'arms', 'thighs', 'body_fat'];
+  const change: Record<string, number | null> = {};
+  for (const field of fields) {
+    const oldVal = oldest[field] as number | null;
+    const newVal = latest[field] as number | null;
+    change[field] = (oldVal !== null && newVal !== null)
+      ? Math.round((newVal - oldVal) * 10) / 10
+      : null;
+  }
+  return change;
+}
+// ── All-time weight progress (for Profile's prominent "lbs lost" stat) ──
+// Different from getWeightChange(30) — that compares against 30 days ago.
+// "Progress: X lbs lost" implies the WHOLE journey, so this compares the
+// latest entry against the very first one ever logged, with no day limit.
+export function getAllTimeWeightChange(): number | null {
+  const db = getDb();
+  const first = db.getFirstSync<WeightLog>(
+    'SELECT * FROM weight_logs ORDER BY created_at ASC LIMIT 1'
+  );
+  const latest = db.getFirstSync<WeightLog>(
+    'SELECT * FROM weight_logs ORDER BY created_at DESC LIMIT 1'
+  );
+  if (!first || !latest || first.id === latest.id) return null; // need at least 2 distinct entries
+  return Math.round((latest.weight - first.weight) * 10) / 10;
+}
+
+// ── Intermittent Fasting ──────────────────────────────────────
+// A fast is "open" while end_time is null (currently fasting), and
+// "closed" once end_time is set (the fast finished or was ended early).
+// planned_hours records what protocol they picked (16, 18, 20, 24, or a
+// custom number) so history can show "16:8 — completed" vs. "ended early".
+
+export interface FastingLog {
+  id: number;
+  start_time: string;
+  end_time: string | null;
+  planned_hours: number;
+}
+
+function ensureFastingTable(db: ReturnType<typeof getDb>) {
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS fasting_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      start_time TEXT NOT NULL DEFAULT (datetime('now')),
+      end_time TEXT,
+      planned_hours REAL NOT NULL
+    );
+  `);
+}
+
+// Starts a new fast. Only one fast can be open at a time — the caller
+// (UI layer) is responsible for checking getActiveFast() first and not
+// calling this again while one is already running.
+export function startFast(plannedHours: number): number {
+  const db = getDb();
+  ensureFastingTable(db);
+  const result = db.runSync(
+    'INSERT INTO fasting_logs (planned_hours) VALUES (?)',
+    [plannedHours]
+  );
+  return result.lastInsertRowId;
+}
+
+// Returns the currently open fast (end_time IS NULL), or null if nothing
+// is running right now.
+export function getActiveFast(): FastingLog | null {
+  const db = getDb();
+  ensureFastingTable(db);
+  return db.getFirstSync<FastingLog>(
+    'SELECT * FROM fasting_logs WHERE end_time IS NULL ORDER BY start_time DESC LIMIT 1'
+  ) ?? null;
+}
+
+// Closes the currently open fast by stamping end_time to now — whether
+// that's because the planned window completed naturally or the person
+// chose to break the fast early. Both cases are recorded the same way;
+// how long it actually ran vs. planned_hours can be derived afterward by
+// comparing start_time/end_time.
+export function endFast(id: number): void {
+  const db = getDb();
+  db.runSync(
+    `UPDATE fasting_logs SET end_time = datetime('now') WHERE id = ?`,
+    [id]
+  );
+}
+
+export function getRecentFasts(limit: number = 20): FastingLog[] {
+  const db = getDb();
+  ensureFastingTable(db);
+  return db.getAllSync<FastingLog>(
+    'SELECT * FROM fasting_logs WHERE end_time IS NOT NULL ORDER BY start_time DESC LIMIT ?',
+    [limit]
+  );
+}
+
+export function deleteFastingLog(id: number): void {
+  const db = getDb();
+  db.runSync('DELETE FROM fasting_logs WHERE id = ?', [id]);
+}
+
+// ── Sleep ──────────────────────────────────────────────────────
+// Same shape as the Body Weight section above — one entry per night,
+// a rolling trend, and a simple average over a window. Quality is
+// optional (a 1-5 rating) since some nights someone only wants to log
+// hours without rating how well they actually slept.
+
+export interface SleepLog {
+  id: number;
+  hours: number;
+  quality: number | null; // 1-5, optional
+  created_at: string;
+}
+
+export interface SleepPoint {
+  date: string;
+  hours: number | null;
+}
+
+function ensureSleepTable(db: ReturnType<typeof getDb>) {
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS sleep_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      hours REAL NOT NULL,
+      quality INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+}
+
+export function logSleep(hours: number, quality: number | null = null): number {
+  const db = getDb();
+  ensureSleepTable(db);
+  const result = db.runSync(
+    'INSERT INTO sleep_logs (hours, quality) VALUES (?, ?)',
+    [hours, quality]
+  );
+  return result.lastInsertRowId;
+}
+
+export function getLatestSleep(): SleepLog | null {
+  const db = getDb();
+  ensureSleepTable(db);
+  return db.getFirstSync<SleepLog>(
+    'SELECT * FROM sleep_logs ORDER BY created_at DESC LIMIT 1'
+  ) ?? null;
+}
+
+export function getRecentSleepLogs(limit: number = 20): SleepLog[] {
+  const db = getDb();
+  ensureSleepTable(db);
+  return db.getAllSync<SleepLog>(
+    'SELECT * FROM sleep_logs ORDER BY created_at DESC LIMIT ?',
+    [limit]
+  );
+}
+
+export function updateSleepLog(id: number, hours: number, quality: number | null): void {
+  const db = getDb();
+  db.runSync(
+    'UPDATE sleep_logs SET hours = ?, quality = ? WHERE id = ?',
+    [hours, quality, id]
+  );
+}
+
+export function deleteSleepLog(id: number): void {
+  const db = getDb();
+  db.runSync('DELETE FROM sleep_logs WHERE id = ?', [id]);
+}
+
+// Same day-filling pattern as getWeightHistory() — one point per day for
+// the window, null where nothing was logged, so a trend line can show
+// real gaps instead of a misleading flat value.
+export function getSleepHistory(daysBack: number = 7): SleepPoint[] {
+  const db = getDb();
+  ensureSleepTable(db);
+  const all = db.getAllSync<SleepLog>(
+    `SELECT * FROM sleep_logs WHERE created_at >= datetime('now', '-${daysBack + 1} days') ORDER BY created_at ASC`
+  );
+
+  // Reuses the same UTC->local conversion already defined at the top of
+  // this file for every other "today"/date-range function.
+  const byDate: Record<string, number> = {};
+  all.forEach(s => {
+    const date = utcTimestampToLocalDateString(s.created_at);
+    byDate[date] = s.hours; // later entries in the same day overwrite earlier ones
+  });
+
+  const result: SleepPoint[] = [];
+  for (let i = daysBack - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const dateStr = getLocalDateString(d);
+    result.push({ date: dateStr, hours: byDate[dateStr] ?? null });
+  }
+  return result;
+}
+
+// Average hours logged over the window — null if nothing's been logged
+// at all in that range, rather than showing a misleading "0h average".
+export function getSleepAverage(daysBack: number = 7): number | null {
+  const history = getSleepHistory(daysBack);
+  const points = history.filter(p => p.hours !== null) as { date: string; hours: number }[];
+  if (points.length === 0) return null;
+  const total = points.reduce((sum, p) => sum + p.hours, 0);
+  return Math.round((total / points.length) * 10) / 10;
+}
+
+// ── Cardio Routes (real distance, GPS or manual) ────────────────────────
+// Links a real distance to a `workouts` row that's already been created via
+// logWorkout(). Both a manually-typed distance and a live GPS-tracked run
+// flow through this same table — `is_gps_tracked` just marks which one it
+// was, so the UI knows whether a route/map replay actually exists.
+// `route_points` is only ever set for a GPS-tracked entry; a manual
+// distance entry stores null there. This table is the single source of
+// truth for real distance — getTotalMiles()'s old workoutCount*3 estimate
+// and recordWorkout()'s old duration/10-or-flat-2 guess both get replaced
+// by real numbers from here wherever a row exists.
+
+interface CardioRouteRow {
+  id: number;
+  workout_id: number;
+  distance_meters: number;
+  route_points: string | null;
+  is_gps_tracked: number;
+  created_at: string;
+}
+
+export interface CardioRoute {
+  id: number;
+  workout_id: number;
+  distance_meters: number;
+  route_points: { lat: number; lng: number; t: number }[] | null;
+  is_gps_tracked: number;
+  created_at: string;
+}
+
+function parseCardioRouteRow(row: CardioRouteRow): CardioRoute {
+  return {
+    ...row,
+    route_points: row.route_points ? JSON.parse(row.route_points) : null,
+  };
+}
+
+function ensureCardioRoutesTable(db: ReturnType<typeof getDb>) {
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS cardio_routes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      workout_id INTEGER NOT NULL,
+      distance_meters REAL NOT NULL,
+      route_points TEXT,
+      is_gps_tracked INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (workout_id) REFERENCES workouts(id)
+    );
+  `);
+}
+
+export function logCardioRoute(
+  workoutId: number,
+  distanceMeters: number,
+  routePoints: { lat: number; lng: number; t: number }[] | null,
+  isGpsTracked: boolean
+): number {
+  const db = getDb();
+  ensureCardioRoutesTable(db);
+  const result = db.runSync(
+    `INSERT INTO cardio_routes (workout_id, distance_meters, route_points, is_gps_tracked) VALUES (?, ?, ?, ?)`,
+    [workoutId, distanceMeters, routePoints ? JSON.stringify(routePoints) : null, isGpsTracked ? 1 : 0]
+  );
+  return result.lastInsertRowId;
+}
+
+export function getCardioRouteForWorkout(workoutId: number): CardioRoute | null {
+  const db = getDb();
+  ensureCardioRoutesTable(db);
+  const row = db.getFirstSync<CardioRouteRow>(
+    `SELECT * FROM cardio_routes WHERE workout_id = ?`,
+    [workoutId]
+  );
+  return row ? parseCardioRouteRow(row) : null;
+}
+
+export function deleteCardioRoute(id: number): void {
+  const db = getDb();
+  db.runSync(`DELETE FROM cardio_routes WHERE id = ?`, [id]);
+}
+
+// ── Cardio Personal Records ──────────────────────────────────────────
+// Mirrors the strength personal_records concept, but computed on the fly
+// from cardio_routes/workouts rather than stored in their own table —
+// there's no "current best" to maintain incrementally the way strength PRs
+// are (checkAndUpdatePR runs on every set logged); cardio records are rare
+// enough events that recomputing via MAX/MIN across all logged runs each
+// time the PR Hall is opened is cheap and can never drift out of sync.
+export interface CardioRecordEntry {
+  workoutId: number;
+  achievedAt: string;
+  isGpsTracked: boolean;
+}
+
+export interface CardioPersonalRecords {
+  longestDistance: (CardioRecordEntry & { miles: number }) | null;
+  fastestPace: (CardioRecordEntry & { secondsPerMile: number; miles: number }) | null;
+  longestDuration: (CardioRecordEntry & { minutes: number }) | null;
+}
+
+// Below this, a single tracked point or two (GPS noise, or someone tapping
+// Finish almost immediately) can produce a technically-real but
+// meaningless "fastest pace" — same reasoning as the live pace guard in
+// Track a Run, just applied to the all-time record instead of the live
+// display.
+const MIN_METERS_FOR_PACE_RECORD = 400; // ~0.25 mi
+
+export function getCardioPersonalRecords(): CardioPersonalRecords {
+  const db = getDb();
+  ensureCardioRoutesTable(db);
+
+  const METERS_PER_MILE = 1609.344;
+
+  const longestDistanceRow = db.getFirstSync<{
+    workout_id: number; distance_meters: number; is_gps_tracked: number; created_at: string;
+  }>(
+    `SELECT cr.workout_id, cr.distance_meters, cr.is_gps_tracked, w.created_at
+     FROM cardio_routes cr
+     JOIN workouts w ON w.id = cr.workout_id
+     WHERE w.type = 'endurance'
+     ORDER BY cr.distance_meters DESC
+     LIMIT 1`
+  );
+
+  const fastestPaceRow = db.getFirstSync<{
+    workout_id: number; distance_meters: number; duration_minutes: number;
+    is_gps_tracked: number; created_at: string;
+  }>(
+    `SELECT cr.workout_id, cr.distance_meters, w.duration_minutes, cr.is_gps_tracked, w.created_at
+     FROM cardio_routes cr
+     JOIN workouts w ON w.id = cr.workout_id
+     WHERE w.type = 'endurance'
+       AND cr.distance_meters >= ${MIN_METERS_FOR_PACE_RECORD}
+       AND w.duration_minutes IS NOT NULL
+       AND w.duration_minutes > 0
+     ORDER BY (w.duration_minutes * 60.0) / cr.distance_meters ASC
+     LIMIT 1`
+  );
+
+  const longestDurationRow = db.getFirstSync<{
+    id: number; duration_minutes: number; created_at: string;
+  }>(
+    `SELECT id, duration_minutes, created_at
+     FROM workouts
+     WHERE type = 'endurance' AND duration_minutes IS NOT NULL AND duration_minutes > 0
+     ORDER BY duration_minutes DESC
+     LIMIT 1`
+  );
+
+  return {
+    longestDistance: longestDistanceRow ? {
+      workoutId: longestDistanceRow.workout_id,
+      achievedAt: longestDistanceRow.created_at,
+      isGpsTracked: longestDistanceRow.is_gps_tracked === 1,
+      miles: Math.round((longestDistanceRow.distance_meters / METERS_PER_MILE) * 100) / 100,
+    } : null,
+    fastestPace: fastestPaceRow ? {
+      workoutId: fastestPaceRow.workout_id,
+      achievedAt: fastestPaceRow.created_at,
+      isGpsTracked: fastestPaceRow.is_gps_tracked === 1,
+      secondsPerMile: Math.round(
+        (fastestPaceRow.duration_minutes * 60) / (fastestPaceRow.distance_meters / METERS_PER_MILE)
+      ),
+      miles: Math.round((fastestPaceRow.distance_meters / METERS_PER_MILE) * 100) / 100,
+    } : null,
+    longestDuration: longestDurationRow ? {
+      workoutId: longestDurationRow.id,
+      achievedAt: longestDurationRow.created_at,
+      isGpsTracked: false,
+      minutes: longestDurationRow.duration_minutes,
+    } : null,
+  };
+}
+
+// ── Active Run Points (live GPS buffer) ─────────────────────────────────
+// Holds the in-progress point stream for whatever run is currently being
+// tracked. This exists SEPARATELY from cardio_routes because the
+// background location task that writes into it can run in a JS context
+// with no React/Zustand state available at all (iOS may relaunch the app
+// fresh just to deliver a location update) — so points need somewhere
+// durable to land immediately, not somewhere that depends on component
+// state surviving. Only ever holds one run's worth of data at a time:
+// startActiveRun() clears it, points accumulate during the run, and
+// finishing/discarding a run clears it again.
+
+export interface ActiveRunPoint {
+  id: number;
+  lat: number;
+  lng: number;
+  timestamp: number;
+}
+
+function ensureActiveRunPointsTable(db: ReturnType<typeof getDb>) {
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS active_run_points (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lat REAL NOT NULL,
+      lng REAL NOT NULL,
+      timestamp INTEGER NOT NULL
+    );
+  `);
+}
+
+export function addActiveRunPoint(lat: number, lng: number, timestamp: number): void {
+  const db = getDb();
+  ensureActiveRunPointsTable(db);
+  db.runSync(
+    `INSERT INTO active_run_points (lat, lng, timestamp) VALUES (?, ?, ?)`,
+    [lat, lng, timestamp]
+  );
+}
+
+export function getActiveRunPoints(): ActiveRunPoint[] {
+  const db = getDb();
+  ensureActiveRunPointsTable(db);
+  return db.getAllSync<ActiveRunPoint>(
+    `SELECT * FROM active_run_points ORDER BY timestamp ASC`
+  );
+}
+
+export function clearActiveRunPoints(): void {
+  const db = getDb();
+  ensureActiveRunPointsTable(db);
+  db.runSync(`DELETE FROM active_run_points`);
 }

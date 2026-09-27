@@ -51,6 +51,7 @@ target 'ValhallaBound' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => podfile_properties['apple.ccacheEnabled'] == 'true',
     )
+    # >>> withFmtFix
     # Fix fmt consteval errors under Xcode 26
     fmt_base = File.join(installer.sandbox.pod_dir('fmt'), 'include', 'fmt', 'base.h')
     if File.exist?(fmt_base)
@@ -62,13 +63,25 @@ target 'ValhallaBound' do
         puts '✅ fmt base.h patched for Xcode 26'
       end
     end
+
     installer.pods_project.targets.each do |target|
       if target.name == 'fmt'
         target.build_configurations.each do |cfg|
           cfg.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
         end
       end
+
+      # Resource bundle (and other) targets default to a very old deployment
+      # target regardless of our Podfile platform line — bump anything below
+      # ours so Xcode 26 stops erroring on the mismatch.
+      target.build_configurations.each do |cfg|
+        current = cfg.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+        if current && current.to_f < 15.1
+          cfg.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1'
+        end
+      end
     end
+    # <<< withFmtFix
 
 
     # This is necessary for Xcode 14, because it signs resource bundles by default

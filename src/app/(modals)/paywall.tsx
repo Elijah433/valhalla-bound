@@ -133,10 +133,41 @@ function QuillIcon({ size = 20, color = Colors.gold }: { size?: number; color?: 
   );
 }
 
+// Fork + knife icon for Recipe Ideas — distinct from ChaliceIcon (Mead
+// Hall's macro/nutrition tracking) since this is about finding NEW food
+// ideas, not logging what you already ate.
+function RecipeIcon({ size = 20, color = Colors.gold }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Rect x="5" y="2" width="1.6" height="10" rx="0.8" fill={color} opacity={0.9} />
+      <Rect x="8" y="2" width="1.6" height="10" rx="0.8" fill={color} opacity={0.9} />
+      <Path d="M5 2 L5 8 C5 9.5 6.5 10 6.8 10 C7.1 10 8.6 9.5 8.6 8 L8.6 2" fill="none" stroke={color} strokeWidth="1.3" opacity={0.9} />
+      <Rect x="6.2" y="10" width="1.2" height="12" rx="0.6" fill={color} opacity={0.9} />
+      <Path d="M16 2 C13.5 2 12.5 5 12.5 8 C12.5 10 14 11 15.3 11 L15.3 22"
+        fill="none" stroke={color} strokeWidth="1.4" opacity={0.9} />
+    </Svg>
+  );
+}
+
+// Hourglass icon for Intermittent Fasting — a simple, universally
+// recognizable "time window" symbol distinct from anything else used here.
+function FastingIcon({ size = 20, color = Colors.gold }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path d="M6 3 L18 3 L18 6 C18 9 15 11 12 11.5 C9 11 6 9 6 6 Z" fill={color} opacity={0.85} />
+      <Path d="M6 21 L18 21 L18 18 C18 15 15 13 12 12.5 C9 13 6 15 6 18 Z" fill={color} opacity={0.6} />
+      <Rect x="5" y="2" width="14" height="1.5" rx="0.75" fill={color} opacity={0.9} />
+      <Rect x="5" y="20.5" width="14" height="1.5" rx="0.75" fill={color} opacity={0.9} />
+    </Svg>
+  );
+}
+
 const PRO_FEATURES = [
   { Icon: ShieldIcon,  label: 'Frost Shields',     desc: 'Protect your streak from one missed day',                     color: '#8B6FD4' },
   { Icon: RankIcon,    label: 'All Ranks',         desc: 'Unlock Jarl, Drengr, and Einherjar',                           color: '#FFD700' },
   { Icon: ChaliceIcon, label: 'Mead Hall',         desc: 'Full macro and nutrition tracking',                           color: '#E05020' },
+  { Icon: RecipeIcon,  label: 'Recipe Ideas',      desc: 'High protein, vegan, keto & more — filterable recipe search', color: '#E05020' },
+  { Icon: FastingIcon, label: 'Intermittent Fasting', desc: 'Live timer, protocols, and fasting history',                color: '#8B6FD4' },
   { Icon: ScrollIcon,  label: 'Full Saga Log',    desc: 'Unlimited workout history and analytics',                     color: Colors.ice },
   { Icon: HavamolIcon, label: "Odin's Wisdom",     desc: "All 164 verses of the Hávamál — unlocked",                    color: '#C9784C' },
 ];
@@ -252,11 +283,6 @@ export default function PaywallModal() {
       if (success) {
         setPro(true);
 
-        // Record when the trial started (no-ops on a restore/renewal
-        // where it's already set) and schedule the ~24h-before-trial-ends
-        // reminder with the warrior's current stats. Both are silent,
-        // best-effort — a failure here should never surface to the user
-        // or block the purchase confirmation they're about to see.
         try {
           await recordTrialStart();
           const freshWarrior = useWarriorStore.getState().warrior;
@@ -515,10 +541,6 @@ export default function PaywallModal() {
             <LinearGradient colors={['transparent', `${weaponColor}40`, 'transparent']} style={styles.runeDivider} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
           </View>
 
-          {/* Sample Chronicle entry — a static, hardcoded preview (not a live
-              Gemini call) so it always renders instantly and never fails or
-              costs anything. Its job is purely to show what Skald's Chronicle
-              actually feels like before someone commits to a trial. */}
           <View style={styles.sagaPreviewCard}>
             <LinearGradient colors={[`${accentColor}08`, 'transparent']} style={StyleSheet.absoluteFill} />
             <LinearGradient colors={['transparent', accentColor, 'transparent']} style={styles.sagaPreviewTopLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
@@ -530,8 +552,6 @@ export default function PaywallModal() {
             <Text style={styles.sagaPreviewFooter}>Written fresh by the skald, every day you train — Pro only</Text>
           </View>
 
-          {/* Free vs Pro comparison — makes the gap concrete rather than
-              making someone infer it from a scrolling feature list. */}
           <View style={styles.compareCard}>
             <View style={styles.compareHeaderRow}>
               <Text style={styles.compareHeaderSpacer}></Text>
@@ -560,13 +580,6 @@ export default function PaywallModal() {
             </View>
           </View>
 
-          {/* Trainer comparison — a DIFFERENT question than the Free vs Pro
-              card above. That one answers "why upgrade within this app?";
-              this one answers "why trust an app over hiring an actual
-              coach?" It's also currently the only place in this paywall
-              that surfaces Progressive Overload Intelligence and Swift
-              Forge, which otherwise appear nowhere here despite being two
-              of the app's most genuinely differentiating features. */}
           <View style={styles.trainerCard}>
             <LinearGradient colors={[`${accentColor}08`, 'transparent']} style={StyleSheet.absoluteFill} />
             <LinearGradient colors={['transparent', accentColor, 'transparent']} style={styles.trainerTopLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
@@ -673,9 +686,6 @@ export default function PaywallModal() {
             </View>
           </View>
 
-          {/* Founder authenticity line — the same honest framing used in
-              creator outreach, placed once here right before the CTA. Plain
-              static text, no animation, no risk. */}
           <Text style={styles.founderNote}>
             Built by one guy training the same battles you are — nights and weekends, for people who actually want to become this.
           </Text>

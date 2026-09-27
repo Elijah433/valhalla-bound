@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Animated, Dimensions, TextInput, Alert, Linking, Image,
+  Animated, Dimensions, TextInput, Alert, Linking, Image, Keyboard,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -13,10 +13,20 @@ import { getRank, RANKS, getRankTitle, getRankDescription } from '@/constants/ra
 import { getRealm, NINE_REALMS } from '@/constants/realms';
 import { useWarriorProfile } from '@/lib/useWarriorProfile';
 import { restorePurchases } from '@/lib/purchases';
+import {
+  getLatestWeight, getWeightChange, getAllTimeWeightChange, logWeight,
+  getLatestMeasurement, getMeasurementChange, logMeasurement,
+  type BodyMeasurement,
+} from '@/lib/db';
 import { Colors, Fonts, Spacing, Radii } from '@/constants/theme';
 
 
 const { width } = Dimensions.get('window');
+
+// How many ranks to show on either side of the current one before the
+// rank path collapses behind a "View Full Path" toggle — keeps the list
+// from rendering every single rank (locked ones included) by default.
+const RANK_WINDOW = 2;
 
 const HAVAMOL_PREVIEW = [
   'Cattle die. Kinsmen die. One day you too will die. But the fame of a good man never dies.',
@@ -213,6 +223,24 @@ export default function ProfileScreen() {
   const [editing, setEditing] = useState(false);
   const [nameInput, setNameInput] = useState(warrior?.name ?? '');
   const [selectedRune, setSelectedRune] = useState<string | null>(null);
+
+  // Weight & Measurements — mirrors the same functions Mead Hall and the
+  // Goals screen already use for weight, so numbers shown here always
+  // agree with what's shown there.
+  const [latestWeight, setLatestWeight] = useState<number | null>(null);
+  const [weightChange, setWeightChange] = useState<number | null>(null);
+  const [allTimeWeightChange, setAllTimeWeightChange] = useState<number | null>(null);
+  const [latestMeasurement, setLatestMeasurement] = useState<BodyMeasurement | null>(null);
+  const [measurementChange, setMeasurementChange] = useState<Record<string, number | null>>({});
+  const [showBodyLogForm, setShowBodyLogForm] = useState(false);
+  const [logWeightInput, setLogWeightInput] = useState('');
+  const [logChest, setLogChest] = useState('');
+  const [logWaist, setLogWaist] = useState('');
+  const [logHips, setLogHips] = useState('');
+  const [logArms, setLogArms] = useState('');
+  const [logThighs, setLogThighs] = useState('');
+  const [logBodyFat, setLogBodyFat] = useState('');
+  const [showFullRankPath, setShowFullRankPath] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   const xp = warrior?.total_xp ?? 0;
@@ -220,15 +248,93 @@ export default function ProfileScreen() {
   const realm = getRealm(xp);
   const accentColor = isShieldmaiden ? '#D4A8C4' : Colors.gold;
 
+  // Compact "Explore" tile row — Nine Realms, Valkyrie Codex, and Hávamál
+  // used to each render as their own full-width card with near-identical
+  // icon+title+subtitle+arrow layout. Collapsed into one horizontal scroll
+  // row so the page doesn't stack four look-alike navigation cards.
+  const EXPLORE_TILES = [
+    {
+      label: 'Nine Realms',
+      sub: `Now walking ${realm.name}`,
+      icon: realm.rune,
+      color: realm.color,
+      action: () => router.push('/(modals)/nine-realms' as any),
+    },
+    ...(isShieldmaiden ? [{
+      label: 'Valkyrie Codex',
+      sub: 'Eight legendary Norse women',
+      icon: 'ᚱ',
+      color: '#D4A8C4',
+      action: () => router.push('/(modals)/valkyrie-codex' as any),
+    }] : []),
+    {
+      label: 'Hávamál',
+      sub: `${Math.max(3, Math.min(workoutCount, 164))} verses unlocked`,
+      icon: 'ᚺ',
+      color: Colors.gold,
+      action: () => router.push('/(modals)/havamol' as any),
+    },
+  ];
+
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }).start();
   }, []);
+
+  function loadBodyStats() {
+    const latest = getLatestWeight();
+    setLatestWeight(latest?.weight ?? null);
+    setWeightChange(getWeightChange(30));
+    setAllTimeWeightChange(getAllTimeWeightChange());
+    setLatestMeasurement(getLatestMeasurement());
+    setMeasurementChange(getMeasurementChange(30));
+  }
 
   useFocusEffect(useCallback(() => {
     AsyncStorage.getItem('valhalla_rune').then(val => {
       if (val) setSelectedRune(val);
     });
+    loadBodyStats();
   }, []));
+
+  // Saves whatever fields were actually filled in — weight and each
+  // measurement are independently optional, since someone might only
+  // want to log their waist today, not the full set.
+  function saveBodyStats() {
+    const w = parseFloat(logWeightInput);
+    const c = parseFloat(logChest);
+    const wa = parseFloat(logWaist);
+    const h = parseFloat(logHips);
+    const a = parseFloat(logArms);
+    const t = parseFloat(logThighs);
+    const bf = parseFloat(logBodyFat);
+
+    const hasWeight = !isNaN(w) && w > 0;
+    const hasAnyMeasurement = [c, wa, h, a, t, bf].some(v => !isNaN(v) && v > 0);
+
+    if (!hasWeight && !hasAnyMeasurement) {
+      Alert.alert('Nothing to log', 'Enter at least one value.');
+      return;
+    }
+
+    if (hasWeight) logWeight(w);
+    if (hasAnyMeasurement) {
+      logMeasurement(
+        !isNaN(c) && c > 0 ? c : null,
+        !isNaN(wa) && wa > 0 ? wa : null,
+        !isNaN(h) && h > 0 ? h : null,
+        !isNaN(a) && a > 0 ? a : null,
+        !isNaN(t) && t > 0 ? t : null,
+        !isNaN(bf) && bf > 0 ? bf : null,
+      );
+    }
+
+    setLogWeightInput(''); setLogChest(''); setLogWaist('');
+    setLogHips(''); setLogArms(''); setLogThighs(''); setLogBodyFat('');
+    setShowBodyLogForm(false);
+    Keyboard.dismiss();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    loadBodyStats();
+  }
 
   function saveName() {
     if (!nameInput.trim()) return;
@@ -249,7 +355,6 @@ export default function ProfileScreen() {
       { label: "Freya's Wardrobe", icon: 'ᛈ', action: () => router.push('/(modals)/valkyrie-aesthetic' as any) },
     ] : []),
     { label: "Odin's Wisdom", icon: 'ᚺ', action: () => router.push('/(modals)/havamol' as any) },
-    { label: 'Drengskapr', icon: 'ᛏ', action: () => router.push('/(modals)/drengskapr' as any) },
     { label: 'Notifications', icon: 'ᛜ', action: () => router.push('/(modals)/notifications' as any) },
     {
       label: 'Restore Purchases',
@@ -353,6 +458,17 @@ export default function ProfileScreen() {
               )}
             </View>
 
+            {allTimeWeightChange !== null && (
+              <View style={styles.progressStatWrap}>
+                <Text style={styles.progressStatLabel}>PROGRESS</Text>
+                <Text style={[styles.progressStatValue, {
+                  color: allTimeWeightChange < 0 ? '#4CAF50' : allTimeWeightChange > 0 ? Colors.blood : Colors.textMuted,
+                }]}>
+                  {Math.abs(allTimeWeightChange).toFixed(1)} lbs {allTimeWeightChange < 0 ? 'lost' : allTimeWeightChange > 0 ? 'gained' : ''}
+                </Text>
+              </View>
+            )}
+
             <Text style={styles.rankDesc}>{getRankDescription(rank, isShieldmaiden)}</Text>
 
             <View style={styles.xpRow}>
@@ -373,84 +489,205 @@ export default function ProfileScreen() {
           </View>
 
           {/* Rank path */}
-          <Text style={styles.sectionLabel}>PATH TO VALHALLA</Text>
-          <View style={styles.rankPath}>
-            {RANKS.map((r, i) => {
-              const reached = i <= rank.index;
-              const isCurrent = i === rank.index;
-              return (
-                <View key={r.title} style={styles.rankPathRow}>
-                  <View style={styles.rankPathLeft}>
-                    <View style={[
-                      styles.rankPathDot,
-                      reached && { backgroundColor: isShieldmaiden ? '#8B3A6A' : Colors.goldDark, borderColor: accentColor },
-                      isCurrent && { backgroundColor: accentColor, borderColor: accentColor },
-                    ]}>
-                      {isCurrent && <View style={styles.rankPathDotInner} />}
-                    </View>
-                    {i < RANKS.length - 1 && (
-                      <View style={[styles.rankPathLine, reached && i < rank.index && { backgroundColor: isShieldmaiden ? '#8B3A6A' : Colors.goldDark }]} />
+          {/* Weight & Measurements — combined card, same pattern as
+              MyFitnessPal's "Weight & Measurements" section. Reuses the
+              exact weight functions Mead Hall and Goals already rely on,
+              so this always agrees with what's shown there. */}
+          <View style={styles.bodyStatsCard}>
+            <LinearGradient colors={['rgba(139,111,212,0.06)', 'transparent']} style={StyleSheet.absoluteFill} />
+            <LinearGradient colors={['transparent', '#8B6FD4', 'transparent']} style={styles.bodyStatsTopLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+            <Text style={styles.bodyStatsTitle}>WEIGHT & MEASUREMENTS</Text>
+
+            <View style={styles.bodyStatsRow}>
+              <View style={styles.bodyStatsStat}>
+                <Text style={styles.bodyStatsLabel}>WEIGHT</Text>
+                <Text style={styles.bodyStatsValue}>
+                  {latestWeight !== null ? latestWeight : '—'}
+                  <Text style={styles.bodyStatsUnit}> lbs</Text>
+                </Text>
+                {weightChange !== null && (
+                  <Text style={[styles.bodyStatsChange, {
+                    color: weightChange < 0 ? '#4CAF50' : weightChange > 0 ? Colors.blood : Colors.textMuted,
+                  }]}>
+                    {weightChange > 0 ? '+' : ''}{weightChange.toFixed(1)} / 30d
+                  </Text>
+                )}
+              </View>
+
+              {[
+                { key: 'chest', label: 'CHEST', unit: 'in' },
+                { key: 'waist', label: 'WAIST', unit: 'in' },
+                { key: 'arms', label: 'ARMS', unit: 'in' },
+                { key: 'body_fat', label: 'BODY FAT', unit: '%' },
+              ].map((m) => {
+                const val = latestMeasurement?.[m.key as keyof BodyMeasurement] as number | null | undefined;
+                const change = measurementChange[m.key];
+                return (
+                  <View key={m.key} style={styles.bodyStatsStat}>
+                    <Text style={styles.bodyStatsLabel}>{m.label}</Text>
+                    <Text style={styles.bodyStatsValue}>
+                      {val != null ? val : '—'}
+                      <Text style={styles.bodyStatsUnit}> {m.unit}</Text>
+                    </Text>
+                    {change !== null && change !== undefined && (
+                      <Text style={[styles.bodyStatsChange, {
+                        color: change < 0 ? '#4CAF50' : change > 0 ? Colors.blood : Colors.textMuted,
+                      }]}>
+                        {change > 0 ? '+' : ''}{change.toFixed(1)} / 30d
+                      </Text>
                     )}
                   </View>
-                  <View style={[styles.rankPathCard, isCurrent && { borderColor: `${accentColor}40` }]}>
-                    {isCurrent && <LinearGradient colors={[`${accentColor}07`, 'transparent']} style={StyleSheet.absoluteFill} />}
-                    <View style={styles.rankPathCardLeft}>
-                  <Text style={[styles.rankPathIcon, { color: reached ? accentColor : 'rgba(255,255,255,0.35)' }]}>{r.icon}</Text>
-                      <View>
-                        <Text style={[styles.rankPathName, isCurrent && { color: accentColor }, !reached && styles.rankPathNameLocked]}>
-                          {getRankTitle(r, isShieldmaiden).toUpperCase()}
-                        </Text>
-                        <Text style={styles.rankPathXP}>{r.minXP.toLocaleString()} VALOR</Text>
-                      </View>
-                    </View>
-                    {isCurrent && (
-                      <View style={[styles.currentBadge, { backgroundColor: `${accentColor}10`, borderColor: `${accentColor}30` }]}>
-                        <Text style={[styles.currentBadgeText, { color: accentColor }]}>NOW</Text>
-                      </View>
-                    )}
-                    {reached && !isCurrent && <Text style={[styles.checkmark, { color: accentColor }]}>✓</Text>}
-                    {!reached && <Text style={styles.lockIcon}>ᚲ</Text>}
+                );
+              })}
+            </View>
+
+            {!showBodyLogForm ? (
+              <TouchableOpacity
+                style={styles.bodyStatsLogBtn}
+                onPress={() => { setShowBodyLogForm(true); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.bodyStatsLogBtnText}>+ Log Weight & Measurements</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.bodyStatsForm}>
+                <View style={styles.bodyStatsFormRow}>
+                  <View style={styles.bodyStatsFormField}>
+                    <Text style={styles.bodyStatsFormLabel}>WEIGHT (lbs)</Text>
+                    <TextInput style={styles.bodyStatsFormInput} value={logWeightInput} onChangeText={setLogWeightInput} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={Colors.textDim} />
+                  </View>
+                  <View style={styles.bodyStatsFormField}>
+                    <Text style={styles.bodyStatsFormLabel}>CHEST (in)</Text>
+                    <TextInput style={styles.bodyStatsFormInput} value={logChest} onChangeText={setLogChest} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={Colors.textDim} />
                   </View>
                 </View>
-              );
-            })}
-          </View>
-          
-
-          {/* ── NINE REALMS JOURNEY — compact teaser ──
-              Full detail lives on its own screen now; this is just a
-              tappable summary, same pattern as the Chronicle/Hávamál
-              teasers elsewhere on this screen. */}
-          <TouchableOpacity
-            style={[styles.realmsTeaser, { borderColor: `${realm.color}30` }]}
-            onPress={() => router.push('/(modals)/nine-realms' as any)}
-            activeOpacity={0.85}
-          >
-            <LinearGradient colors={[`${realm.color}08`, 'transparent']} style={StyleSheet.absoluteFill} />
-            <LinearGradient colors={['transparent', realm.color, 'transparent']} style={styles.realmsTeaserLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
-            <View style={[styles.realmsTeaserIconWrap, { borderColor: `${realm.color}40`, backgroundColor: `${realm.color}12` }]}>
-              <Text style={[styles.realmsTeaserIcon, { color: realm.color }]}>{realm.rune}</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.realmsTeaserEyebrow}>THE NINE REALMS</Text>
-              <Text style={[styles.realmsTeaserName, { color: realm.color }]}>Now walking {realm.name}</Text>
-            </View>
-            <Text style={[styles.realmsTeaserArrow, { color: realm.color }]}>→</Text>
-          </TouchableOpacity>
-
-          {/* Valkyrie Codex CTA */}
-          {isShieldmaiden && (
-            <TouchableOpacity style={styles.valkCard} onPress={() => router.push('/(modals)/valkyrie-codex' as any)} activeOpacity={0.85}>
-              <LinearGradient colors={['rgba(212,168,196,0.1)', 'transparent']} style={StyleSheet.absoluteFill} />
-              <LinearGradient colors={['transparent', '#D4A8C4', 'transparent']} style={styles.valkCardLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
-              <Text style={styles.valkCardRune}>ᚱ</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.valkCardTitle}>Valkyrie Codex</Text>
-                <Text style={styles.valkCardSub}>Eight legendary Norse women. Their stories. Your lineage.</Text>
+                <View style={styles.bodyStatsFormRow}>
+                  <View style={styles.bodyStatsFormField}>
+                    <Text style={styles.bodyStatsFormLabel}>WAIST (in)</Text>
+                    <TextInput style={styles.bodyStatsFormInput} value={logWaist} onChangeText={setLogWaist} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={Colors.textDim} />
+                  </View>
+                  <View style={styles.bodyStatsFormField}>
+                    <Text style={styles.bodyStatsFormLabel}>HIPS (in)</Text>
+                    <TextInput style={styles.bodyStatsFormInput} value={logHips} onChangeText={setLogHips} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={Colors.textDim} />
+                  </View>
+                </View>
+                <View style={styles.bodyStatsFormRow}>
+                  <View style={styles.bodyStatsFormField}>
+                    <Text style={styles.bodyStatsFormLabel}>ARMS (in)</Text>
+                    <TextInput style={styles.bodyStatsFormInput} value={logArms} onChangeText={setLogArms} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={Colors.textDim} />
+                  </View>
+                  <View style={styles.bodyStatsFormField}>
+                    <Text style={styles.bodyStatsFormLabel}>THIGHS (in)</Text>
+                    <TextInput style={styles.bodyStatsFormInput} value={logThighs} onChangeText={setLogThighs} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={Colors.textDim} />
+                  </View>
+                </View>
+                <View style={styles.bodyStatsFormRow}>
+                  <View style={styles.bodyStatsFormField}>
+                    <Text style={styles.bodyStatsFormLabel}>BODY FAT (%)</Text>
+                    <TextInput style={styles.bodyStatsFormInput} value={logBodyFat} onChangeText={setLogBodyFat} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={Colors.textDim} />
+                  </View>
+                  <View style={styles.bodyStatsFormField} />
+                </View>
+                <Text style={styles.bodyStatsFormHint}>Leave any field blank to skip it today.</Text>
+                <View style={styles.bodyStatsFormBtnRow}>
+                  <TouchableOpacity style={styles.bodyStatsCancelBtn} onPress={() => { setShowBodyLogForm(false); Keyboard.dismiss(); }}>
+                    <Text style={styles.bodyStatsCancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.bodyStatsSaveBtn} onPress={saveBodyStats}>
+                    <Text style={styles.bodyStatsSaveBtnText}>Save</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-              <Text style={styles.valkCardArrow}>→</Text>
-            </TouchableOpacity>
-          )}
+            )}
+          </View>
+
+          <Text style={styles.sectionLabel}>PATH TO VALHALLA</Text>
+          <View style={styles.rankPath}>
+            {(() => {
+              const ranked = RANKS.map((r, i) => ({ r, i }));
+              const visible = showFullRankPath
+                ? ranked
+                : ranked.filter(({ i }) => Math.abs(i - rank.index) <= RANK_WINDOW);
+              return visible.map(({ r, i }, idx) => {
+                const reached = i <= rank.index;
+                const isCurrent = i === rank.index;
+                const isLastVisible = idx === visible.length - 1;
+                return (
+                  <View key={r.title} style={styles.rankPathRow}>
+                    <View style={styles.rankPathLeft}>
+                      <View style={[
+                        styles.rankPathDot,
+                        reached && { backgroundColor: isShieldmaiden ? '#8B3A6A' : Colors.goldDark, borderColor: accentColor },
+                        isCurrent && { backgroundColor: accentColor, borderColor: accentColor },
+                      ]}>
+                        {isCurrent && <View style={styles.rankPathDotInner} />}
+                      </View>
+                      {!isLastVisible && (
+                        <View style={[styles.rankPathLine, reached && i < rank.index && { backgroundColor: isShieldmaiden ? '#8B3A6A' : Colors.goldDark }]} />
+                      )}
+                    </View>
+                    <View style={[styles.rankPathCard, isCurrent && { borderColor: `${accentColor}40` }]}>
+                      {isCurrent && <LinearGradient colors={[`${accentColor}07`, 'transparent']} style={StyleSheet.absoluteFill} />}
+                      <View style={styles.rankPathCardLeft}>
+                    <Text style={[styles.rankPathIcon, { color: reached ? accentColor : 'rgba(255,255,255,0.35)' }]}>{r.icon}</Text>
+                        <View>
+                          <Text style={[styles.rankPathName, isCurrent && { color: accentColor }, !reached && styles.rankPathNameLocked]}>
+                            {getRankTitle(r, isShieldmaiden).toUpperCase()}
+                          </Text>
+                          <Text style={styles.rankPathXP}>{r.minXP.toLocaleString()} VALOR</Text>
+                        </View>
+                      </View>
+                      {isCurrent && (
+                        <View style={[styles.currentBadge, { backgroundColor: `${accentColor}10`, borderColor: `${accentColor}30` }]}>
+                          <Text style={[styles.currentBadgeText, { color: accentColor }]}>NOW</Text>
+                        </View>
+                      )}
+                      {reached && !isCurrent && <Text style={[styles.checkmark, { color: accentColor }]}>✓</Text>}
+                      {!reached && <Text style={styles.lockIcon}>ᚲ</Text>}
+                    </View>
+                  </View>
+                );
+              });
+            })()}
+            {RANKS.length > RANK_WINDOW * 2 + 1 && (
+              <TouchableOpacity
+                style={styles.rankPathToggle}
+                onPress={() => { setShowFullRankPath(v => !v); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.rankPathToggleText, { color: accentColor }]}>
+                  {showFullRankPath ? '↑  Show Fewer Ranks' : `↓  View Full Path (${RANKS.length} Ranks)`}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* ── EXPLORE — compact tile row ──
+              Nine Realms, Valkyrie Codex, and Hávamál collapsed from three
+              full-width teaser cards into one horizontal scroll row. */}
+          <Text style={styles.sectionLabel}>EXPLORE</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.exploreRow}
+            contentContainerStyle={styles.exploreRowContent}
+          >
+            {EXPLORE_TILES.map((tile) => (
+              <TouchableOpacity
+                key={tile.label}
+                style={[styles.exploreTile, { borderColor: `${tile.color}30` }]}
+                onPress={tile.action}
+                activeOpacity={0.85}
+              >
+                <LinearGradient colors={[`${tile.color}10`, 'transparent']} style={StyleSheet.absoluteFill} />
+                <View style={[styles.exploreTileIconWrap, { borderColor: `${tile.color}40`, backgroundColor: `${tile.color}12` }]}>
+                  <Text style={[styles.exploreTileIcon, { color: tile.color }]}>{tile.icon}</Text>
+                </View>
+                <Text style={[styles.exploreTileLabel, { color: tile.color }]}>{tile.label}</Text>
+                <Text style={styles.exploreTileSub} numberOfLines={2}>{tile.sub}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
 
           {/* Upgrade or Pro card */}
           {!isPro ? (
@@ -475,42 +712,6 @@ export default function ProfileScreen() {
             </View>
           )}
 
-          {/* Hávamál teaser */}
-          <TouchableOpacity style={styles.havamolCard} onPress={() => router.push('/(modals)/havamol' as any)} activeOpacity={0.85}>
-            <LinearGradient colors={['rgba(139,26,26,0.12)', 'rgba(201,168,76,0.06)', 'transparent']} style={StyleSheet.absoluteFill} />
-            <LinearGradient colors={['transparent', Colors.gold, 'transparent']} style={styles.havamolTopLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
-            <View style={styles.havamolLeft}>
-              <Text style={styles.havamolRune}>ᚺ</Text>
-            </View>
-            <View style={styles.havamolText}>
-              <Text style={styles.havamolEyebrow}>THE ANCIENT TEXTS</Text>
-              <Text style={styles.havamolTitle}>Hávamál</Text>
-              <Text style={styles.havamolVerse} numberOfLines={2}>
-                {HAVAMOL_PREVIEW[Math.min(Math.max(0, workoutCount - 1), HAVAMOL_PREVIEW.length - 1)]}
-              </Text>
-            </View>
-            <View style={styles.havamolRight}>
-              <Text style={[styles.havamolCount, { color: accentColor }]}>{Math.max(3, Math.min(workoutCount, 164))}</Text>
-              <Text style={styles.havamolCountLabel}>UNLOCKED</Text>
-              <Text style={styles.havamolArrow}>→</Text>
-            </View>
-          </TouchableOpacity>
-
-          {/* Drengskapr card */}
-          <TouchableOpacity style={styles.drengskaprCard} onPress={() => router.push('/(modals)/drengskapr' as any)} activeOpacity={0.85}>
-            <LinearGradient colors={['rgba(201,168,76,0.1)', 'transparent']} style={StyleSheet.absoluteFill} />
-            <LinearGradient colors={['transparent', Colors.gold, 'transparent']} style={styles.drengskaprTopLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
-            <View style={styles.drengskaprLeft}>
-              <Text style={styles.drengskaprRune}>ᛏ</Text>
-            </View>
-            <View style={styles.drengskaprText}>
-              <Text style={styles.drengskaprEyebrow}>THE CODE OF HONOR</Text>
-              <Text style={styles.drengskaprTitle}>Drengskapr</Text>
-              <Text style={styles.drengskaprSub}>Ten tenets. Honor shown through action.</Text>
-            </View>
-            <Text style={styles.drengskaprArrow}>→</Text>
-          </TouchableOpacity>
-
           {/* Daily Saga card */}
           <DailySagaCard accentColor={accentColor} />
 
@@ -530,7 +731,6 @@ export default function ProfileScreen() {
                   item.label === 'My Rune' && { color: accentColor },
                   item.label === 'Gear Guide' && { color: Colors.gold },
                   item.label === "Odin's Wisdom" && { color: Colors.gold },
-                  item.label === 'Drengskapr' && { color: Colors.gold },
                 ]}>
                   {item.icon}
                 </Text>
@@ -539,7 +739,6 @@ export default function ProfileScreen() {
                   item.label === 'Valkyrie Codex' && { color: '#D4A8C4' },
                   item.label === 'My Rune' && { color: accentColor },
                   item.label === "Odin's Wisdom" && { color: Colors.gold },
-                  item.label === 'Drengskapr' && { color: Colors.gold },
                 ]}>
                   {item.label}
                 </Text>
@@ -551,7 +750,7 @@ export default function ProfileScreen() {
           {/* Footer */}
           <View style={styles.footer}>
             <Text style={styles.footerRunes}>{isShieldmaiden ? 'ᚠ  ᚢ  ᚱ  ᚨ  ᛁ' : 'ᚠ  ᚢ  ᚦ  ᚨ  ᚱ'}</Text>
-            <Text style={styles.footerVersion}>VALHALLA BOUND v1.9.0</Text>
+            <Text style={styles.footerVersion}>VALHALLA BOUND v2.4.0</Text>
             <Text style={styles.footerVerse}>
               {isShieldmaiden
                 ? '"She is clothed with strength and dignity." — Proverbs 31:25'
@@ -613,10 +812,48 @@ const styles = StyleSheet.create({
   proBadgeText: { fontFamily: Fonts.body, fontSize: 9, color: Colors.gold, letterSpacing: 1.5 },
   valkBadge: { backgroundColor: 'rgba(212,168,196,0.1)', borderWidth: 1, borderColor: 'rgba(212,168,196,0.3)', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 3 },
   valkBadgeText: { fontFamily: Fonts.body, fontSize: 9, color: '#D4A8C4', letterSpacing: 1.5 },
+  progressStatWrap: { alignItems: 'center', gap: 2, marginVertical: 2 },
+  progressStatLabel: { fontFamily: Fonts.body, fontSize: 8, letterSpacing: 2, color: Colors.textMuted },
+  progressStatValue: { fontFamily: Fonts.heading, fontSize: 20, letterSpacing: 0.3 },
+
   rankDesc: { fontFamily: Fonts.proseItalic, fontSize: 13, color: Colors.textMuted, fontStyle: 'italic', textAlign: 'center' },
   xpRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: 4 },
   xpNum: { fontFamily: Fonts.heading, fontSize: 28 },
   xpLabel: { fontFamily: Fonts.body, fontSize: 10, color: Colors.textMuted, letterSpacing: 2 },
+
+  bodyStatsCard: {
+    marginHorizontal: Spacing.lg, marginBottom: Spacing.lg,
+    borderWidth: 1, borderColor: 'rgba(139,111,212,0.25)', borderRadius: 18,
+    padding: Spacing.lg, overflow: 'hidden', backgroundColor: 'rgba(12,10,16,0.9)', gap: 12,
+  },
+  bodyStatsTopLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 1 },
+  bodyStatsTitle: { fontFamily: Fonts.body, fontSize: 9, letterSpacing: 3, color: '#8B6FD4' },
+  bodyStatsRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  bodyStatsStat: { alignItems: 'center', gap: 2, flex: 1 },
+  bodyStatsLabel: { fontFamily: Fonts.body, fontSize: 8, letterSpacing: 1, color: Colors.textMuted },
+  bodyStatsValue: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.text },
+  bodyStatsUnit: { fontFamily: Fonts.prose, fontSize: 10, color: Colors.textMuted },
+  bodyStatsChange: { fontFamily: Fonts.body, fontSize: 9 },
+  bodyStatsLogBtn: {
+    borderWidth: 1, borderColor: 'rgba(139,111,212,0.3)', borderRadius: 10,
+    paddingVertical: 10, alignItems: 'center', backgroundColor: 'rgba(139,111,212,0.06)',
+  },
+  bodyStatsLogBtnText: { fontFamily: Fonts.subheading, fontSize: 12, color: '#8B6FD4' },
+  bodyStatsForm: { gap: 10 },
+  bodyStatsFormRow: { flexDirection: 'row', gap: 10 },
+  bodyStatsFormField: { flex: 1 },
+  bodyStatsFormLabel: { fontFamily: Fonts.body, fontSize: 8, letterSpacing: 1, color: Colors.textMuted, marginBottom: 4 },
+  bodyStatsFormInput: {
+    fontFamily: Fonts.heading, fontSize: 16, color: Colors.text,
+    borderWidth: 1, borderColor: 'rgba(139,111,212,0.25)', borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 8,
+  },
+  bodyStatsFormHint: { fontFamily: Fonts.proseItalic, fontSize: 10, color: Colors.textDim, fontStyle: 'italic' },
+  bodyStatsFormBtnRow: { flexDirection: 'row', gap: 10, marginTop: 2 },
+  bodyStatsCancelBtn: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.05)' },
+  bodyStatsCancelBtnText: { fontFamily: Fonts.subheading, fontSize: 12, color: Colors.textMuted },
+  bodyStatsSaveBtn: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 8, backgroundColor: '#8B6FD4' },
+  bodyStatsSaveBtnText: { fontFamily: Fonts.heading, fontSize: 12, color: Colors.void, letterSpacing: 0.5 },
 
   sectionLabel: { fontFamily: Fonts.body, fontSize: 9, letterSpacing: 3, color: Colors.textMuted, paddingHorizontal: Spacing.lg, marginBottom: 10 },
 
@@ -636,29 +873,22 @@ const styles = StyleSheet.create({
   currentBadgeText: { fontFamily: Fonts.body, fontSize: 8, letterSpacing: 1 },
   checkmark: { fontSize: 13 },
   lockIcon: { fontSize: 13, color: Colors.textDim, opacity: 0.3, fontFamily: 'System' },
+  rankPathToggle: { alignItems: 'center', paddingVertical: 10, marginTop: 2 },
+  rankPathToggleText: { fontFamily: Fonts.body, fontSize: 10, letterSpacing: 1.5 },
 
-  realmsTeaser: {
-    marginHorizontal: Spacing.lg, marginBottom: Spacing.lg,
-    borderWidth: 1, borderRadius: 14, padding: Spacing.md,
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    overflow: 'hidden', backgroundColor: 'rgba(10,8,14,0.95)',
+  exploreRow: { marginBottom: Spacing.lg },
+  exploreRowContent: { paddingHorizontal: Spacing.lg, gap: 10 },
+  exploreTile: {
+    width: 118, borderWidth: 1, borderRadius: 14, padding: Spacing.md,
+    overflow: 'hidden', backgroundColor: 'rgba(10,8,14,0.95)', gap: 6,
   },
-  realmsTeaserLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 1 },
-  realmsTeaserIconWrap: {
-    width: 38, height: 38, borderRadius: 10, borderWidth: 1,
+  exploreTileIconWrap: {
+    width: 32, height: 32, borderRadius: 9, borderWidth: 1,
     alignItems: 'center', justifyContent: 'center',
   },
-  realmsTeaserIcon: { fontSize: 18, fontFamily: 'System' },
-  realmsTeaserEyebrow: { fontFamily: Fonts.body, fontSize: 7, letterSpacing: 2.5, color: Colors.textMuted, marginBottom: 2 },
-  realmsTeaserName: { fontFamily: Fonts.heading, fontSize: 13, letterSpacing: 0.3 },
-  realmsTeaserArrow: { fontFamily: Fonts.heading, fontSize: 16, opacity: 0.6 },
-
-  valkCard: { marginHorizontal: Spacing.lg, marginBottom: Spacing.lg, borderWidth: 1, borderColor: 'rgba(212,168,196,0.25)', borderRadius: 14, padding: Spacing.lg, flexDirection: 'row', alignItems: 'center', gap: 12, overflow: 'hidden' },
-  valkCardLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 1 },
-  valkCardRune: { fontSize: 24, color: '#D4A8C4', fontFamily: 'System', opacity: 0.7 },
-  valkCardTitle: { fontFamily: Fonts.heading, fontSize: 14, color: '#D4A8C4', letterSpacing: 0.5, marginBottom: 3 },
-  valkCardSub: { fontFamily: Fonts.prose, fontSize: 12, color: Colors.textMuted, lineHeight: 17 },
-  valkCardArrow: { fontFamily: Fonts.heading, fontSize: 18, color: '#D4A8C4', opacity: 0.5 },
+  exploreTileIcon: { fontSize: 15, fontFamily: 'System' },
+  exploreTileLabel: { fontFamily: Fonts.heading, fontSize: 12, letterSpacing: 0.3 },
+  exploreTileSub: { fontFamily: Fonts.prose, fontSize: 10, color: Colors.textMuted, lineHeight: 14 },
 
   upgradeCard: { marginHorizontal: Spacing.lg, marginBottom: Spacing.lg, borderWidth: 1, borderColor: Colors.goldBorder, borderRadius: 14, padding: Spacing.lg, flexDirection: 'row', alignItems: 'center', gap: 12, overflow: 'hidden' },
   upgradeTopLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 1 },
@@ -671,29 +901,6 @@ const styles = StyleSheet.create({
   proCardIcon: { fontSize: 24 },
   proCardTitle: { fontFamily: Fonts.heading, fontSize: 14, color: Colors.gold, letterSpacing: 0.5, marginBottom: 3 },
   proCardSub: { fontFamily: Fonts.proseItalic, fontSize: 12, color: Colors.textMuted, fontStyle: 'italic' },
-
-  havamolCard: { marginHorizontal: Spacing.lg, marginBottom: Spacing.lg, borderWidth: 1, borderColor: 'rgba(201,168,76,0.2)', borderRadius: 16, padding: Spacing.lg, flexDirection: 'row', alignItems: 'center', gap: 12, overflow: 'hidden', backgroundColor: 'rgba(10,8,14,0.95)' },
-  havamolTopLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 1 },
-  havamolLeft: { width: 44, height: 44, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(201,168,76,0.2)', backgroundColor: 'rgba(201,168,76,0.06)', alignItems: 'center', justifyContent: 'center' },
-  havamolRune: { fontSize: 24, fontFamily: 'System', color: Colors.gold },
-  havamolText: { flex: 1, gap: 2 },
-  havamolEyebrow: { fontFamily: Fonts.body, fontSize: 7, letterSpacing: 3, color: 'rgba(201,168,76,0.5)' },
-  havamolTitle: { fontFamily: Fonts.heading, fontSize: 14, color: Colors.gold, letterSpacing: 1 },
-  havamolVerse: { fontFamily: Fonts.proseItalic, fontSize: 11, color: Colors.textMuted, fontStyle: 'italic', lineHeight: 16 },
-  havamolRight: { alignItems: 'center', gap: 2 },
-  havamolCount: { fontFamily: Fonts.heading, fontSize: 20, lineHeight: 22 },
-  havamolCountLabel: { fontFamily: Fonts.body, fontSize: 6, letterSpacing: 1.5, color: Colors.textMuted },
-  havamolArrow: { fontFamily: Fonts.heading, fontSize: 16, color: Colors.textMuted, marginTop: 4 },
-
-  drengskaprCard: { marginHorizontal: Spacing.lg, marginBottom: Spacing.lg, borderWidth: 1, borderColor: 'rgba(201,168,76,0.2)', borderRadius: 16, padding: Spacing.lg, flexDirection: 'row', alignItems: 'center', gap: 12, overflow: 'hidden', backgroundColor: 'rgba(10,8,14,0.95)' },
-  drengskaprTopLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 1 },
-  drengskaprLeft: { width: 44, height: 44, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(201,168,76,0.2)', backgroundColor: 'rgba(201,168,76,0.06)', alignItems: 'center', justifyContent: 'center' },
-  drengskaprRune: { fontSize: 22, fontFamily: 'System', color: Colors.gold },
-  drengskaprText: { flex: 1, gap: 2 },
-  drengskaprEyebrow: { fontFamily: Fonts.body, fontSize: 7, letterSpacing: 3, color: 'rgba(201,168,76,0.5)' },
-  drengskaprTitle: { fontFamily: Fonts.heading, fontSize: 14, color: Colors.gold, letterSpacing: 1 },
-  drengskaprSub: { fontFamily: Fonts.prose, fontSize: 11, color: Colors.textMuted, lineHeight: 16 },
-  drengskaprArrow: { fontFamily: Fonts.heading, fontSize: 16, color: Colors.textMuted },
 
   sagaCard: {
     marginHorizontal: Spacing.lg, marginBottom: Spacing.lg,

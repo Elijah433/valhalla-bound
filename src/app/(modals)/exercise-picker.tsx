@@ -11,6 +11,7 @@ import Svg, { Circle, Line } from 'react-native-svg';
 import { EXERCISES, CATEGORY_LABELS, CATEGORY_ORDER, CATEGORY_RUNES, CATEGORY_COLORS, type Exercise } from '@/constants/exercises';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCustomExercises, addCustomExercise, getRecentExercises, type RecentExerciseSummary } from '@/lib/db';
+import { useGuidedSessionStore, type GuidedExercise } from '@/lib/guidedSession';
 import { Colors, Fonts, Spacing, Radii } from '@/constants/theme';
 
 const { width } = Dimensions.get('window');
@@ -43,6 +44,14 @@ export default function ExercisePickerModal() {
   const [customMuscles, setCustomMuscles] = useState('');
   const [customCategory, setCustomCategory] = useState<Exercise['category']>('custom');
   const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  // Guided Session build mode — when on, tapping an exercise adds it to
+  // an ordered queue instead of jumping straight into Strength Log.
+  // Order is preserved as selection order (the order they'll be trained
+  // in), not category order.
+  const [guidedMode, setGuidedMode] = useState(false);
+  const [selectedExercises, setSelectedExercises] = useState<Exercise[]>([]);
+  const startGuidedSession = useGuidedSessionStore(s => s.startSession);
 
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
@@ -102,11 +111,15 @@ export default function ExercisePickerModal() {
   }
 
  function handlePick(exercise: Exercise) {
+  if (guidedMode) {
+    toggleGuidedSelection(exercise);
+    return;
+  }
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   router.push({
     pathname: '/(modals)/strength-log',
-    params: { 
-      exerciseId: exercise.id, 
+    params: {
+      exerciseId: exercise.id,
       exerciseName: exercise.name,
       noXp: params.noXp ?? '0',
     },
@@ -114,12 +127,67 @@ export default function ExercisePickerModal() {
 }
 
   function handlePickRecent(recent: RecentExerciseSummary) {
+    if (guidedMode) {
+      // Recent entries don't carry category/muscles — the guided queue
+      // only needs id/name/category (muscles are cosmetic on this
+      // screen), so 'custom' is a safe placeholder category here; it's
+      // never shown once the session starts.
+      toggleGuidedSelection({
+        id: recent.exerciseId,
+        name: recent.exerciseName,
+        category: 'custom',
+        muscles: '',
+        equipment: 'both',
+      });
+      return;
+    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     router.push({
       pathname: '/(modals)/strength-log',
       params: {
         exerciseId: recent.exerciseId,
         exerciseName: recent.exerciseName,
+        noXp: params.noXp ?? '0',
+      },
+    });
+  }
+
+  // Toggles guided-session membership for one exercise, tap to add,
+  // tap again to remove — preserves selection order for everything
+  // already picked.
+  function toggleGuidedSelection(exercise: Exercise) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedExercises(prev => {
+      const already = prev.some(e => e.id === exercise.id);
+      if (already) return prev.filter(e => e.id !== exercise.id);
+      return [...prev, exercise];
+    });
+  }
+
+  function toggleGuidedMode() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setGuidedMode(prev => {
+      if (prev) setSelectedExercises([]); // leaving build mode clears the draft
+      return !prev;
+    });
+  }
+
+  function handleStartGuidedSession() {
+    if (selectedExercises.length === 0) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const queue: GuidedExercise[] = selectedExercises.map(e => ({
+      exerciseId: e.id,
+      exerciseName: e.name,
+      category: e.category,
+    }));
+    startGuidedSession(queue);
+    const first = queue[0];
+    router.push({
+      pathname: '/(modals)/strength-log',
+      params: {
+        exerciseId: first.exerciseId,
+        exerciseName: first.exerciseName,
+        guided: '1',
         noXp: params.noXp ?? '0',
       },
     });
@@ -132,15 +200,26 @@ export default function ExercisePickerModal() {
     }
     const id = addCustomExercise(customName.trim(), customMuscles.trim(), customCategory);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const newExercise: Exercise = {
+      id, name: customName.trim(), category: customCategory,
+      muscles: customMuscles.trim(), equipment: 'both',
+    };
     setShowAddCustom(false);
     setCustomName('');
     setCustomMuscles('');
     setCustomCategory('custom');
     loadCustom();
+    // In guided mode this adds the new exercise to the draft queue
+    // instead of jumping straight into Strength Log, matching how every
+    // other pick behaves while building a session.
+    if (guidedMode) {
+      setSelectedExercises(prev => [...prev, newExercise]);
+      return;
+    }
    router.push({
   pathname: '/(modals)/strength-log',
-  params: { 
-    exerciseId: id, 
+  params: {
+    exerciseId: id,
     exerciseName: customName.trim(),
     noXp: params.noXp ?? '0',
   },
@@ -188,6 +267,27 @@ export default function ExercisePickerModal() {
               <Text style={styles.closeBtnText}>✕</Text>
             </TouchableOpacity>
           </View>
+
+          <TouchableOpacity
+            style={[styles.guidedToggle, guidedMode && styles.guidedToggleActive]}
+            onPress={toggleGuidedMode}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={guidedMode ? ['rgba(201,168,76,0.14)', 'rgba(201,168,76,0.04)'] : ['rgba(255,255,255,0.03)', 'transparent']}
+              style={StyleSheet.absoluteFill}
+            />
+            <Text style={styles.guidedToggleRune}>⚡</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.guidedToggleTitle, guidedMode && styles.guidedToggleTitleActive]}>
+                {guidedMode ? 'BUILDING GUIDED SESSION' : 'BUILD A GUIDED SESSION'}
+              </Text>
+              <Text style={styles.guidedToggleSub}>
+                {guidedMode ? 'Tap exercises below to add them, in order' : 'Pick several exercises, train them back to back with auto rest timers'}
+              </Text>
+            </View>
+            <Text style={styles.guidedToggleAction}>{guidedMode ? 'CANCEL' : 'START'}</Text>
+          </TouchableOpacity>
 
           <View style={styles.searchWrap}>
             <SearchIcon size={16} color={Colors.textMuted} />
@@ -341,27 +441,38 @@ export default function ExercisePickerModal() {
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.recentRow}
                 >
-                  {recentExercises.map((r) => (
-                    <TouchableOpacity
-                      key={r.exerciseId}
-                      style={styles.recentCard}
-                      onPress={() => handlePickRecent(r)}
-                      activeOpacity={0.8}
-                    >
-                      <LinearGradient colors={['rgba(201,168,76,0.08)', 'transparent']} style={StyleSheet.absoluteFill} />
+                  {recentExercises.map((r) => {
+                    const selectedIndex = selectedExercises.findIndex(e => e.id === r.exerciseId);
+                    const isSelected = selectedIndex !== -1;
+                    return (
                       <TouchableOpacity
-                        style={styles.recentCardDismiss}
-                        onPress={() => hideFromRecent(r.exerciseId)}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        key={r.exerciseId}
+                        style={[styles.recentCard, isSelected && styles.exerciseRowSelected]}
+                        onPress={() => handlePickRecent(r)}
+                        activeOpacity={0.8}
                       >
-                        <Text style={styles.recentCardDismissText}>✕</Text>
+                        <LinearGradient colors={['rgba(201,168,76,0.08)', 'transparent']} style={StyleSheet.absoluteFill} />
+                        {!guidedMode && (
+                          <TouchableOpacity
+                            style={styles.recentCardDismiss}
+                            onPress={() => hideFromRecent(r.exerciseId)}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <Text style={styles.recentCardDismissText}>✕</Text>
+                          </TouchableOpacity>
+                        )}
+                        {guidedMode && isSelected && (
+                          <View style={[styles.selectBadge, styles.selectBadgeActive, styles.recentCardDismiss]}>
+                            <Text style={styles.selectBadgeText}>{selectedIndex + 1}</Text>
+                          </View>
+                        )}
+                        <Text style={styles.recentCardName} numberOfLines={1}>{r.exerciseName}</Text>
+                        <Text style={styles.recentCardLast}>
+                          Last: {r.lastWeight} lbs × {r.lastReps}
+                        </Text>
                       </TouchableOpacity>
-                      <Text style={styles.recentCardName} numberOfLines={1}>{r.exerciseName}</Text>
-                      <Text style={styles.recentCardLast}>
-                        Last: {r.lastWeight} lbs × {r.lastReps}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                    );
+                  })}
                 </ScrollView>
               </View>
             )}
@@ -376,25 +487,35 @@ export default function ExercisePickerModal() {
                       {CATEGORY_LABELS[cat as Exercise['category']]}
                     </Text>
                   </View>
-                  {exercises.map((exercise) => (
-                    <TouchableOpacity
-                      key={exercise.id}
-                      style={styles.exerciseRow}
-                      onPress={() => handlePick(exercise)}
-                      activeOpacity={0.7}
-                    >
-                      <LinearGradient
-                        colors={[`${catColor}08`, 'transparent']}
-                        style={StyleSheet.absoluteFill}
-                      />
-                      <View style={[styles.exerciseDot, { backgroundColor: catColor }]} />
-                      <View style={styles.exerciseInfo}>
-                        <Text style={styles.exerciseName}>{exercise.name}</Text>
-                        <Text style={styles.exerciseMuscles}>{exercise.muscles}</Text>
-                      </View>
-                      <Text style={[styles.exerciseArrow, { color: `${catColor}90` }]}>›</Text>
-                    </TouchableOpacity>
-                  ))}
+                  {exercises.map((exercise) => {
+                    const selectedIndex = selectedExercises.findIndex(e => e.id === exercise.id);
+                    const isSelected = selectedIndex !== -1;
+                    return (
+                      <TouchableOpacity
+                        key={exercise.id}
+                        style={[styles.exerciseRow, isSelected && styles.exerciseRowSelected]}
+                        onPress={() => handlePick(exercise)}
+                        activeOpacity={0.7}
+                      >
+                        <LinearGradient
+                          colors={isSelected ? ['rgba(201,168,76,0.1)', 'transparent'] : [`${catColor}08`, 'transparent']}
+                          style={StyleSheet.absoluteFill}
+                        />
+                        <View style={[styles.exerciseDot, { backgroundColor: catColor }]} />
+                        <View style={styles.exerciseInfo}>
+                          <Text style={styles.exerciseName}>{exercise.name}</Text>
+                          <Text style={styles.exerciseMuscles}>{exercise.muscles}</Text>
+                        </View>
+                        {guidedMode ? (
+                          <View style={[styles.selectBadge, isSelected && styles.selectBadgeActive]}>
+                            <Text style={styles.selectBadgeText}>{isSelected ? selectedIndex + 1 : ''}</Text>
+                          </View>
+                        ) : (
+                          <Text style={[styles.exerciseArrow, { color: `${catColor}90` }]}>›</Text>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
               );
             })}
@@ -412,8 +533,20 @@ export default function ExercisePickerModal() {
               </View>
             )}
 
-            <View style={{ height: 40 }} />
+            <View style={{ height: guidedMode && selectedExercises.length > 0 ? 90 : 40 }} />
           </ScrollView>
+
+          {guidedMode && selectedExercises.length > 0 && (
+            <View style={styles.startBar}>
+              <LinearGradient colors={['transparent', '#050508', '#050508']} style={styles.startBarFade} pointerEvents="none" />
+              <TouchableOpacity style={styles.startBarBtn} onPress={handleStartGuidedSession} activeOpacity={0.85}>
+                <LinearGradient colors={[Colors.goldDark, Colors.gold]} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+                <Text style={styles.startBarBtnText}>
+                  ▶  START GUIDED SESSION · {selectedExercises.length} {selectedExercises.length === 1 ? 'EXERCISE' : 'EXERCISES'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
         </Animated.View>
       </SafeAreaView>
@@ -467,6 +600,49 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.textMuted,
   },
+
+  guidedToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: Radii.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 10,
+    overflow: 'hidden',
+  },
+  guidedToggleActive: { borderColor: Colors.goldBorder },
+  guidedToggleRune: { fontSize: 16, fontFamily: 'System' },
+  guidedToggleTitle: { fontFamily: Fonts.subheading, fontSize: 12, color: Colors.text, letterSpacing: 0.5 },
+  guidedToggleTitleActive: { color: Colors.gold },
+  guidedToggleSub: { fontFamily: Fonts.prose, fontSize: 10, color: Colors.textMuted, marginTop: 2 },
+  guidedToggleAction: { fontFamily: Fonts.body, fontSize: 9, letterSpacing: 1.5, color: Colors.textMuted },
+
+  selectBadge: {
+    width: 24, height: 24, borderRadius: 12,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  selectBadgeActive: {
+    backgroundColor: Colors.gold,
+    borderColor: Colors.gold,
+  },
+  selectBadgeText: { fontFamily: Fonts.heading, fontSize: 11, color: Colors.void },
+  exerciseRowSelected: { borderBottomColor: 'rgba(201,168,76,0.25)' },
+
+  startBar: {
+    position: 'absolute', left: 0, right: 0, bottom: 0,
+    paddingHorizontal: Spacing.lg, paddingTop: 30, paddingBottom: 10,
+  },
+  startBarFade: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  startBarBtn: {
+    borderRadius: Radii.md, overflow: 'hidden', paddingVertical: 15,
+    alignItems: 'center',
+  },
+  startBarBtnText: { fontFamily: Fonts.heading, fontSize: 13, color: Colors.void, letterSpacing: 1 },
 
   searchWrap: {
     flexDirection: 'row',

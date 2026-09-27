@@ -7,7 +7,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { CATEGORY_COLORS, CATEGORY_RUNES, CATEGORY_LABELS } from '@/constants/exercises';
-import { generateAdaptiveWorkout, type GeneratedWorkout, type EquipmentPreference } from '@/lib/adaptiveWorkout';
+import {
+  generateAdaptiveWorkout, getInjuryFlag, setInjuryFlag, clearInjuryFlag, getInjuryStatus,
+  BODY_AREAS, type GeneratedWorkout, type EquipmentPreference, type InjuryFlag, type BodyArea,
+} from '@/lib/adaptiveWorkout';
+import { useGuidedSessionStore, type GuidedExercise } from '@/lib/guidedSession';
 import { Colors, Fonts, Spacing, Radii } from '@/constants/theme';
 
 // Quick-select presets rather than a raw number input — matches the same
@@ -19,20 +23,48 @@ export default function AdaptiveWorkoutScreen() {
   const [minutes, setMinutes] = useState(22);
   const [equipment, setEquipment] = useState<EquipmentPreference>('home');
   const [workout, setWorkout] = useState<GeneratedWorkout | null>(null);
+  const [injuryFlag, setInjuryFlagState] = useState<InjuryFlag | null>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const startGuidedSession = useGuidedSessionStore(s => s.startSession);
 
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
   }, []);
 
+  // Pick up any injury flag logged earlier (today or a few days back) so
+  // the very first plan generated already respects it — the chip row
+  // just reflects whatever's currently active, it doesn't start blank
+  // every time this screen opens.
+  useEffect(() => {
+    getInjuryFlag().then(setInjuryFlagState);
+  }, []);
+
   function handleGenerate() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setWorkout(generateAdaptiveWorkout(minutes, equipment));
+    setWorkout(generateAdaptiveWorkout(minutes, equipment, injuryFlag));
   }
 
   function handleRegenerate() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setWorkout(generateAdaptiveWorkout(minutes, equipment));
+    setWorkout(generateAdaptiveWorkout(minutes, equipment, injuryFlag));
+  }
+
+  // Tapping an area logs it (or re-logs it, resetting the clock) and
+  // immediately reflects it in whatever plan is on screen. Tapping the
+  // already-active area again clears it — that's the "feeling better"
+  // path, same tap either way rather than a separate button.
+  async function handleToggleInjuryArea(area: BodyArea) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (injuryFlag?.area === area) {
+      await clearInjuryFlag();
+      setInjuryFlagState(null);
+      if (workout) setWorkout(generateAdaptiveWorkout(minutes, equipment, null));
+    } else {
+      await setInjuryFlag(area);
+      const fresh: InjuryFlag = { area, loggedAt: new Date().toISOString() };
+      setInjuryFlagState(fresh);
+      if (workout) setWorkout(generateAdaptiveWorkout(minutes, equipment, fresh));
+    }
   }
 
   // Cardio exercises log through the cardio flow (matching how Berserker
@@ -55,6 +87,31 @@ export default function AdaptiveWorkoutScreen() {
   function goBack() {
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)/berserker' as any);
+  }
+
+  // Guided Session only queues the strength exercises from the battle
+  // plan — cardio doesn't fit the same "log a set, rest, next exercise"
+  // rhythm (it's a single duration/distance entry, not a series of
+  // sets), so any cardio item stays available to log the normal way by
+  // tapping its card, same as before this feature existed.
+  function handleStartGuidedSession() {
+    if (!workout) return;
+    const strengthOnly = workout.exercises.filter(ge => ge.exercise.category !== 'cardio');
+    if (strengthOnly.length === 0) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const queue: GuidedExercise[] = strengthOnly.map(ge => ({
+      exerciseId: ge.exercise.id,
+      exerciseName: ge.exercise.name,
+      category: ge.exercise.category,
+      targetSets: ge.sets,
+      targetReps: ge.reps,
+    }));
+    startGuidedSession(queue);
+    const first = queue[0];
+    router.push({
+      pathname: '/(modals)/strength-log',
+      params: { exerciseId: first.exerciseId, exerciseName: first.exerciseName, guided: '1' },
+    });
   }
 
   return (
@@ -119,6 +176,38 @@ export default function AdaptiveWorkoutScreen() {
             })}
           </View>
 
+          {/* Injury-aware adaptation */}
+          <Text style={styles.sectionLabel}>ANYTHING BOTHERING YOU TODAY?</Text>
+          <View style={styles.injuryRow}>
+            {BODY_AREAS.map((area) => {
+              const isActive = injuryFlag?.area === area;
+              return (
+                <TouchableOpacity
+                  key={area}
+                  style={[styles.injuryChip, isActive && styles.injuryChipActive]}
+                  onPress={() => handleToggleInjuryArea(area)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.injuryChipText, isActive && styles.injuryChipTextActive]}>
+                    {area.toUpperCase()}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          {injuryFlag && (
+            <View style={styles.injuryStatusNote}>
+              <Text style={styles.injuryStatusNoteText}>
+                {(() => {
+                  const status = getInjuryStatus(injuryFlag);
+                  return status.phase === 'avoiding'
+                    ? `Avoiding ${status.area} work — tap ${status.area.toUpperCase()} again once it feels better.`
+                    : `Easing back into ${status.area} work — normal rotation returns in ${status.daysUntilClear} day${status.daysUntilClear === 1 ? '' : 's'}.`;
+                })()}
+              </Text>
+            </View>
+          )}
+
           <TouchableOpacity style={styles.generateBtn} onPress={handleGenerate} activeOpacity={0.85}>
             <LinearGradient colors={[Colors.goldDark, Colors.gold]} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
             <Text style={styles.generateBtnText}>
@@ -134,10 +223,28 @@ export default function AdaptiveWorkoutScreen() {
                 <Text style={styles.resultMeta}>~{workout.estimatedMinutes} min · {workout.exercises.length} exercises</Text>
               </View>
 
+              {workout.exercises.some(ge => ge.exercise.category !== 'cardio') && (
+                <TouchableOpacity style={styles.guidedBtn} onPress={handleStartGuidedSession} activeOpacity={0.85}>
+                  <LinearGradient colors={[Colors.goldDark, Colors.gold]} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+                  <Text style={styles.guidedBtnText}>▶  START GUIDED SESSION</Text>
+                  <Text style={styles.guidedBtnSub}>Auto rest timers · trains each exercise in order</Text>
+                </TouchableOpacity>
+              )}
+
               {workout.categoriesAvoided.length > 0 && (
                 <View style={styles.avoidedNote}>
                   <Text style={styles.avoidedNoteText}>
                     Deprioritized {workout.categoriesAvoided.map(c => CATEGORY_LABELS[c as keyof typeof CATEGORY_LABELS]).join(', ')} — trained recently.
+                  </Text>
+                </View>
+              )}
+
+              {workout.injuryAvoidance && (
+                <View style={styles.avoidedNote}>
+                  <Text style={styles.avoidedNoteText}>
+                    {workout.injuryAvoidance.phase === 'avoiding'
+                      ? `Skipping ${workout.injuryAvoidance.area} work while it settles.`
+                      : `Easing back into ${workout.injuryAvoidance.area} work with a lighter rotation.`}
                   </Text>
                 </View>
               )}
@@ -228,6 +335,21 @@ const styles = StyleSheet.create({
   equipmentChipText: { fontFamily: Fonts.subheading, fontSize: 13, color: Colors.textMuted },
   equipmentChipTextActive: { color: Colors.gold },
 
+  injuryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  injuryChip: {
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 10,
+    paddingVertical: 9, paddingHorizontal: 12, backgroundColor: 'rgba(255,255,255,0.02)',
+  },
+  injuryChipActive: { borderColor: 'rgba(224,80,80,0.5)', backgroundColor: 'rgba(224,80,80,0.12)' },
+  injuryChipText: { fontFamily: Fonts.body, fontSize: 10, letterSpacing: 1, color: Colors.textMuted },
+  injuryChipTextActive: { color: Colors.blood },
+
+  injuryStatusNote: {
+    borderWidth: 1, borderColor: 'rgba(224,80,80,0.2)', borderRadius: 10,
+    padding: 10, marginBottom: Spacing.lg, backgroundColor: 'rgba(224,80,80,0.05)',
+  },
+  injuryStatusNoteText: { fontFamily: Fonts.proseItalic, fontSize: 11, color: Colors.textDim, fontStyle: 'italic' },
+
   generateBtn: {
     borderRadius: Radii.md, overflow: 'hidden', paddingVertical: 16,
     alignItems: 'center', marginBottom: Spacing.lg,
@@ -238,6 +360,13 @@ const styles = StyleSheet.create({
   resultHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
   resultTitle: { fontFamily: Fonts.body, fontSize: 9, letterSpacing: 3, color: Colors.textMuted },
   resultMeta: { fontFamily: Fonts.body, fontSize: 10, color: Colors.gold, letterSpacing: 0.5 },
+
+  guidedBtn: {
+    borderRadius: Radii.md, overflow: 'hidden', paddingVertical: 13,
+    alignItems: 'center', marginBottom: 10,
+  },
+  guidedBtnText: { fontFamily: Fonts.heading, fontSize: 13, color: Colors.void, letterSpacing: 1 },
+  guidedBtnSub: { fontFamily: Fonts.body, fontSize: 9, color: 'rgba(5,5,8,0.65)', letterSpacing: 0.3, marginTop: 2 },
 
   avoidedNote: {
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', borderRadius: 10,

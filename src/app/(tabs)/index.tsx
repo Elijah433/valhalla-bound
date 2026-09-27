@@ -16,6 +16,10 @@ import { StreakFlame } from '../../components/StreakFlame';
 import { Colors, Fonts, Spacing, Radii } from '@/constants/theme';
 import { useWarriorProfile } from '@/lib/useWarriorProfile';
 import { getRecentSagaEntries, cleanSagaText, type SagaEntry, logRavenCheckin, getTodayRavenCheckin, getRecentRavenCheckins, type RavenCheckin, addXP } from '@/lib/db';
+import {
+  TRIP_PROFILES, getTripProfile, startVacation, endVacation, getActiveVacation,
+  daysRemaining, type TripType, type VacationState,
+} from '@/lib/vacationMode';
 const { width, height } = Dimensions.get('window');
 
 const UPSELL_DISMISSED_KEY = 'pro_upsell_dismissed';
@@ -246,6 +250,9 @@ export default function HomeScreen() {
   const [ravenHistory, setRavenHistory] = useState<RavenCheckin[]>([]);
   const [ravenPanelOpen, setRavenPanelOpen] = useState(false);
   const [ravenNote, setRavenNote] = useState('');
+  const [vacation, setVacationState] = useState<VacationState | null>(null);
+  const [vacationPanelOpen, setVacationPanelOpen] = useState(false);
+  const [pendingTripType, setPendingTripType] = useState<TripType | null>(null);
 const { isShieldmaiden } = useWarriorProfile();
   const fadeAnim        = useRef(new Animated.Value(0)).current;
   const runeAnim        = useRef(new Animated.Value(0)).current;
@@ -257,7 +264,11 @@ const { isShieldmaiden } = useWarriorProfile();
   const xp          = warrior?.total_xp ?? 0;
   const rank        = getRank(xp);
   const streakDays  = warrior?.streak_days ?? 0;
-  const mission     = getMission(activeProgram, completedDays);
+  const baseMission = getMission(activeProgram, completedDays);
+  const tripProfile = vacation ? getTripProfile(vacation.tripType) : null;
+  const mission     = vacation && tripProfile
+    ? { ...tripProfile.mission, color: Colors.ice, programId: null, isCompleted: false }
+    : baseMission;
   const trainedToday = todayWorkouts.length > 0;
   const xpPct       = Math.round(rank.progress * 100);
 const accentColor = isShieldmaiden ? '#D4A8C4' : Colors.gold;
@@ -267,6 +278,7 @@ useFocusEffect(useCallback(() => {
     loadCrewState();
     loadChronicleState();
     loadRavenState();
+    loadVacationState();
     setTimeout(() => checkNewVerse(), 300);
   }, [isPro]));
   async function loadProgramState() {
@@ -305,6 +317,30 @@ useFocusEffect(useCallback(() => {
       setTodayRavenCheckin(null);
       setRavenHistory([]);
     }
+  }
+
+  async function loadVacationState() {
+    try {
+      setVacationState(await getActiveVacation());
+    } catch (e) {}
+  }
+
+  function handleBeginVacation(days: number) {
+    if (!pendingTripType) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    startVacation(pendingTripType, days).then(state => {
+      setVacationState(state);
+      setVacationPanelOpen(false);
+      setPendingTripType(null);
+    });
+  }
+
+  function handleEndVacation() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    endVacation().then(() => {
+      setVacationState(null);
+      setVacationPanelOpen(false);
+    });
   }
 
   function ravenMoodColor(mood: string): string {
@@ -489,25 +525,46 @@ async function dismissUpsell() {
             </View>
           </View>
 
+          {/* ── VACATION MODE BANNER (active only) ── */}
+          {vacation && tripProfile && (
+            <TouchableOpacity
+              style={styles.vacationBanner}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setVacationPanelOpen(o => !o); }}
+              activeOpacity={0.85}
+            >
+              <LinearGradient colors={['rgba(168,196,212,0.1)', 'rgba(168,196,212,0.03)', 'transparent']} style={StyleSheet.absoluteFill} />
+              <Text style={styles.vacationBannerIcon}>{tripProfile.rune}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.vacationBannerEyebrow}>ON VACATION · {tripProfile.chipLabel}</Text>
+                <Text style={styles.vacationBannerSub}>
+                  Streak protected · {daysRemaining(vacation)} {daysRemaining(vacation) === 1 ? 'day' : 'days'} left
+                </Text>
+              </View>
+              <Text style={styles.vacationBannerArrow}>{vacationPanelOpen ? '▲' : '▼'}</Text>
+            </TouchableOpacity>
+          )}
+
           {/* ── MISSION CARD — dominant ── */}
           <Animated.View style={[styles.missionCard, {
             opacity: missionAnim,
-            borderColor: trainedToday ? 'rgba(74,175,80,0.35)' : `${mission.color}40`,
+            borderColor: vacation ? 'rgba(168,196,212,0.35)' : (trainedToday ? 'rgba(74,175,80,0.35)' : `${mission.color}40`),
           }]}>
             <LinearGradient
-              colors={trainedToday
+              colors={vacation
+                ? ['rgba(168,196,212,0.1)', 'rgba(168,196,212,0.03)', 'transparent']
+                : trainedToday
                 ? ['rgba(74,175,80,0.1)', 'rgba(74,175,80,0.03)', 'transparent']
                 : [`${mission.color}16`, `${mission.color}06`, 'transparent']}
               style={StyleSheet.absoluteFill}
               start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
             />
             <LinearGradient
-              colors={['transparent', trainedToday ? '#4CAF50' : mission.color, 'transparent']}
+              colors={['transparent', vacation ? Colors.ice : (trainedToday ? '#4CAF50' : mission.color), 'transparent']}
               style={styles.missionLine}
               start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
             />
-            <Text style={[styles.missionEyebrow, { color: trainedToday ? '#4CAF50' : mission.color }]}>
-              {trainedToday ? 'WORKOUT COMPLETE' : "TODAY'S WORKOUT"}
+            <Text style={[styles.missionEyebrow, { color: vacation ? Colors.ice : (trainedToday ? '#4CAF50' : mission.color) }]}>
+              {vacation ? 'ON VACATION' : (trainedToday ? 'WORKOUT COMPLETE' : "TODAY'S WORKOUT")}
             </Text>
             <View style={styles.missionTitleRow}>
               <Text style={styles.missionTitle}>{mission.title}</Text>
@@ -532,13 +589,68 @@ async function dismissUpsell() {
                   start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
                 />
                 <LinearGradient colors={['rgba(255,255,255,0.12)', 'transparent']} style={styles.missionBtnShine} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} />
-                <Text style={styles.missionBtnText}>BEGIN WORKOUT</Text>
+                <Text style={styles.missionBtnText}>{vacation ? 'LOG IT ANYWAY' : 'BEGIN WORKOUT'}</Text>
                 <View style={styles.missionBtnArrow}>
                   <Text style={styles.missionBtnArrowText}>→</Text>
                 </View>
               </TouchableOpacity>
             )}
           </Animated.View>
+
+          {vacationPanelOpen && (
+            <View style={styles.vacationCard}>
+              <LinearGradient colors={['rgba(168,196,212,0.06)', 'transparent']} style={StyleSheet.absoluteFill} />
+              <LinearGradient colors={['transparent', Colors.ice, 'transparent']} style={styles.vacationTopLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+
+              {vacation ? (
+                <View>
+                  <Text style={styles.vacationEyebrow}>CURRENTLY AWAY</Text>
+                  <Text style={styles.vacationPromptText}>
+                    Your streak stays safe the whole trip — no shield spent, nothing to remember. Back early? End it below.
+                  </Text>
+                  <TouchableOpacity style={styles.vacationEndBtn} onPress={handleEndVacation} activeOpacity={0.8}>
+                    <Text style={styles.vacationEndBtnText}>END VACATION EARLY</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View>
+                  <Text style={styles.vacationEyebrow}>WHERE ARE YOU HEADED?</Text>
+                  <View style={styles.vacationTripRow}>
+                    {TRIP_PROFILES.map((p) => (
+                      <TouchableOpacity
+                        key={p.id}
+                        style={[styles.vacationTripChip, pendingTripType === p.id && styles.vacationTripChipActive]}
+                        onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPendingTripType(p.id); }}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.vacationTripChipRune}>{p.rune}</Text>
+                        <Text style={[styles.vacationTripChipText, pendingTripType === p.id && styles.vacationTripChipTextActive]}>
+                          {p.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  {pendingTripType && (
+                    <>
+                      <Text style={[styles.vacationEyebrow, { marginTop: 12 }]}>FOR HOW LONG?</Text>
+                      <View style={styles.vacationDaysRow}>
+                        {[3, 5, 7, 10].map((d) => (
+                          <TouchableOpacity
+                            key={d}
+                            style={styles.vacationDayBtn}
+                            onPress={() => handleBeginVacation(d)}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={styles.vacationDayBtnText}>{d} DAYS</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </>
+                  )}
+                </View>
+              )}
+            </View>
+          )}
 
           {ravenPanelOpen && (
             <View style={styles.ravenCard}>
@@ -745,7 +857,7 @@ async function dismissUpsell() {
             </ScrollView>
           )}
 
-     
+
 {/* ── QUICK ACCESS ── */}
 <View style={styles.sectionRow}>
   <Text style={styles.sectionTitle}>QUICK ACCESS</Text>
@@ -778,7 +890,7 @@ async function dismissUpsell() {
       <Text style={styles.quickLabel}>{item.label}</Text>
       <Text style={styles.quickSub}>{item.sub}</Text>
     </TouchableOpacity>
-    
+
   ))}
 </View>
 <View style={styles.bottomRuneStrip}>
@@ -858,6 +970,51 @@ const styles = StyleSheet.create({
   crewLeaderDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: Colors.gold, marginLeft: 2 },
   proChip: { borderRadius: Radii.full, overflow: 'hidden', paddingHorizontal: 14, paddingVertical: 7, flexShrink: 0 },
   proChipText: { fontFamily: Fonts.body, fontSize: 10, color: Colors.void, letterSpacing: 2 },
+
+  vacationBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    marginHorizontal: Spacing.lg, marginBottom: 10,
+    borderWidth: 1, borderColor: 'rgba(168,196,212,0.3)',
+    borderRadius: 14, overflow: 'hidden', backgroundColor: 'rgba(14,11,20,0.95)',
+    paddingHorizontal: Spacing.md, paddingVertical: 10,
+  },
+  vacationBannerIcon: { fontSize: 20, color: Colors.ice, fontFamily: 'System' },
+  vacationBannerEyebrow: { fontFamily: Fonts.body, fontSize: 8, letterSpacing: 1.5, color: Colors.ice, marginBottom: 2 },
+  vacationBannerSub: { fontFamily: Fonts.prose, fontSize: 11, color: Colors.textMuted },
+  vacationBannerArrow: { fontFamily: Fonts.body, fontSize: 10, color: Colors.ice, opacity: 0.7 },
+
+  vacationCard: {
+    marginHorizontal: Spacing.lg, marginBottom: 10,
+    borderWidth: 1, borderColor: 'rgba(168,196,212,0.2)',
+    borderRadius: 14, overflow: 'hidden', backgroundColor: 'rgba(14,11,20,0.95)',
+    padding: 14,
+  },
+  vacationTopLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 1 },
+  vacationEyebrow: { fontFamily: Fonts.body, fontSize: 8, letterSpacing: 2, color: Colors.ice, opacity: 0.85, marginBottom: 8 },
+  vacationPromptText: { fontFamily: Fonts.proseItalic, fontSize: 12, color: Colors.textMuted, fontStyle: 'italic', lineHeight: 17, marginBottom: 12 },
+  vacationTripRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  vacationTripChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    borderWidth: 1, borderColor: 'rgba(168,196,212,0.25)',
+    borderRadius: Radii.full, paddingHorizontal: 10, paddingVertical: 7,
+    backgroundColor: 'rgba(168,196,212,0.05)',
+  },
+  vacationTripChipActive: { borderColor: Colors.ice, backgroundColor: 'rgba(168,196,212,0.18)' },
+  vacationTripChipRune: { fontSize: 12, fontFamily: 'System', color: Colors.ice },
+  vacationTripChipText: { fontFamily: Fonts.body, fontSize: 9, letterSpacing: 0.5, color: Colors.textMuted },
+  vacationTripChipTextActive: { color: Colors.ice },
+  vacationDaysRow: { flexDirection: 'row', gap: 8 },
+  vacationDayBtn: {
+    flex: 1, alignItems: 'center',
+    borderWidth: 1, borderColor: Colors.ice, borderRadius: 10,
+    paddingVertical: 10, backgroundColor: 'rgba(168,196,212,0.1)',
+  },
+  vacationDayBtnText: { fontFamily: Fonts.heading, fontSize: 11, letterSpacing: 1, color: Colors.ice },
+  vacationEndBtn: {
+    alignItems: 'center', borderWidth: 1, borderColor: 'rgba(168,196,212,0.3)',
+    borderRadius: 10, paddingVertical: 10,
+  },
+  vacationEndBtnText: { fontFamily: Fonts.body, fontSize: 10, letterSpacing: 1.5, color: Colors.textMuted },
 
   missionCard: {
     marginHorizontal: Spacing.lg, marginBottom: 10,

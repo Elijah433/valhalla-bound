@@ -7,43 +7,142 @@ import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { getAllPersonalRecords, type PersonalRecord } from '@/lib/db';
+import {
+  getAllPersonalRecords, type PersonalRecord,
+  getCardioPersonalRecords, type CardioPersonalRecords,
+} from '@/lib/db';
 import { useWarriorStore } from '@/lib/store';
 import { Colors, Fonts, Spacing, Radii } from '@/constants/theme';
 
 const { width } = Dimensions.get('window');
 
 const RUNES = ['ᚠ', 'ᚢ', 'ᚦ', 'ᚨ', 'ᚱ', 'ᚲ', 'ᚷ', 'ᚹ', 'ᛁ', 'ᛟ'];
+const CARDIO_RUNES = ['ᛚ', 'ᛗ', 'ᛞ'];
 
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr);
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+function formatPaceFromSeconds(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = Math.round(totalSeconds % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function formatDurationMinutes(totalMinutes: number): string {
+  const h = Math.floor(totalMinutes / 60);
+  const m = Math.round(totalMinutes % 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+// One entry per cardio record that actually exists — deliberately reuses
+// the exact same visual template as the strength PR cards below (prCard,
+// prWeight, etc.) rather than introducing a second card style, so "Longest
+// Raid" and "Deadlift" read as the same kind of achievement rather than
+// two different UI languages competing for attention.
+interface CardioPRItem {
+  key: string;
+  eyebrow: string;
+  name: string;
+  heroValue: string;
+  heroUnit: string;
+  metaLine: string;
+  rune: string;
+  shareLines: string[];
+}
+
+function buildCardioPRItems(cardio: CardioPersonalRecords | null): CardioPRItem[] {
+  if (!cardio) return [];
+  const items: CardioPRItem[] = [];
+
+  if (cardio.longestDistance) {
+    const r = cardio.longestDistance;
+    items.push({
+      key: 'longest-distance',
+      eyebrow: `LONGEST RAID · ${formatDate(r.achievedAt)}${r.isGpsTracked ? ' · GPS' : ''}`,
+      name: 'Longest Raid',
+      heroValue: r.miles.toFixed(2),
+      heroUnit: 'MILES',
+      metaLine: 'DISTANCE COVERED',
+      rune: CARDIO_RUNES[0],
+      shareLines: [`🏃 LONGEST RAID 🏃`, ``, `${r.miles.toFixed(2)} MILES`],
+    });
+  }
+
+  if (cardio.fastestPace) {
+    const r = cardio.fastestPace;
+    items.push({
+      key: 'fastest-pace',
+      eyebrow: `SWIFTEST PACE · ${formatDate(r.achievedAt)}${r.isGpsTracked ? ' · GPS' : ''}`,
+      name: 'Swiftest Pace',
+      heroValue: formatPaceFromSeconds(r.secondsPerMile),
+      heroUnit: '/ MILE',
+      metaLine: `OVER ${r.miles.toFixed(2)} MI`,
+      rune: CARDIO_RUNES[1],
+      shareLines: [`⚡ SWIFTEST PACE ⚡`, ``, `${formatPaceFromSeconds(r.secondsPerMile)} PER MILE`],
+    });
+  }
+
+  if (cardio.longestDuration) {
+    const r = cardio.longestDuration;
+    items.push({
+      key: 'longest-duration',
+      eyebrow: `LONGEST CAMPAIGN · ${formatDate(r.achievedAt)}`,
+      name: 'Longest Campaign',
+      heroValue: formatDurationMinutes(r.minutes),
+      heroUnit: '',
+      metaLine: 'TIME ON RAID',
+      rune: CARDIO_RUNES[2],
+      shareLines: [`⏱️ LONGEST CAMPAIGN ⏱️`, ``, `${formatDurationMinutes(r.minutes)}`],
+    });
+  }
+
+  return items;
+}
+
 export default function PRHallScreen() {
   const { warrior } = useWarriorStore();
   const [records, setRecords] = useState<PersonalRecord[]>([]);
+  const [cardioRecords, setCardioRecords] = useState<CardioPersonalRecords | null>(null);
   const fadeAnim  = useRef(new Animated.Value(0)).current;
   const headerAnim = useRef(new Animated.Value(0)).current;
   const cardAnims = useRef<Animated.Value[]>([]).current;
+  const cardioCardAnims = useRef<Animated.Value[]>([]).current;
   const glowAnim  = useRef(new Animated.Value(0)).current;
+
+  const cardioItems = buildCardioPRItems(cardioRecords);
+  const hasCardioRecords = cardioItems.length > 0;
 
   useEffect(() => {
     const prs = getAllPersonalRecords();
     setRecords(prs);
 
+    const cardio = getCardioPersonalRecords();
+    setCardioRecords(cardio);
+    const cardioCount = buildCardioPRItems(cardio).length;
+
     prs.forEach((_, i) => {
       if (!cardAnims[i]) cardAnims[i] = new Animated.Value(0);
     });
+    for (let i = 0; i < cardioCount; i++) {
+      if (!cardioCardAnims[i]) cardioCardAnims[i] = new Animated.Value(0);
+    }
 
     Animated.sequence([
       Animated.timing(fadeAnim,   { toValue: 1, duration: 500, useNativeDriver: true }),
       Animated.timing(headerAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
     ]).start();
 
+    for (let i = 0; i < cardioCount; i++) {
+      Animated.timing(cardioCardAnims[i] ?? new Animated.Value(0), {
+        toValue: 1, duration: 500, delay: 200 + i * 100, useNativeDriver: true,
+      }).start();
+    }
+
     prs.forEach((_, i) => {
       Animated.timing(cardAnims[i] ?? new Animated.Value(0), {
-        toValue: 1, duration: 500, delay: 200 + i * 100, useNativeDriver: true,
+        toValue: 1, duration: 500, delay: 200 + cardioCount * 100 + i * 100, useNativeDriver: true,
       }).start();
     });
 
@@ -74,7 +173,24 @@ export default function PRHallScreen() {
     } catch {}
   }
 
+  async function handleShareCardio(item: CardioPRItem) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    try {
+      await Share.share({
+        message: [
+          ...item.shareLines,
+          ``,
+          `🪓 ${warrior?.name ?? 'Warrior'} — Valhalla Bound`,
+          `Train Until Ragnarök`,
+          ``,
+          `#ValhallaFit #NewPR #TrackARun #VikingFitness`,
+        ].join('\n'),
+      });
+    } catch {}
+  }
+
   const glowOpacity = glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.22] });
+  const hasAnyRecords = records.length > 0 || hasCardioRecords;
 
   return (
     <View style={styles.root}>
@@ -124,7 +240,7 @@ export default function PRHallScreen() {
             </Text>
           </Animated.View>
 
-          {records.length === 0 ? (
+          {!hasAnyRecords ? (
             <View style={styles.emptyWrap}>
               <Text style={styles.emptyRune}>ᚦ</Text>
               <Text style={styles.emptyTitle}>No Feats Yet</Text>
@@ -150,40 +266,16 @@ export default function PRHallScreen() {
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
             >
-              {/* Warrior banner */}
-              <View style={styles.warriorBanner}>
-                <LinearGradient colors={['rgba(201,168,76,0.1)', 'rgba(201,168,76,0.04)', 'transparent']} style={StyleSheet.absoluteFill} />
-                <LinearGradient
-                  colors={['transparent', Colors.gold, 'transparent']}
-                  style={styles.bannerTopLine}
-                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                />
-                <View style={styles.bannerStat}>
-                  <Text style={styles.bannerStatVal}>{records.length}</Text>
-                  <Text style={styles.bannerStatLabel}>FEATS{'\n'}EARNED</Text>
-                </View>
-                <View style={styles.bannerDivider} />
-                <View style={styles.bannerCenter}>
-                  <Text style={styles.bannerName}>{warrior?.name ?? 'WARRIOR'}</Text>
-                  <Text style={styles.bannerTitle}>EINHERJAR</Text>
-                </View>
-                <View style={styles.bannerDivider} />
-                <View style={styles.bannerStat}>
-                  <Text style={styles.bannerStatVal}>
-                    {Math.max(...records.map(r => r.best_weight))}
-                  </Text>
-                  <Text style={styles.bannerStatLabel}>HEAVIEST{'\n'}LBS</Text>
-                </View>
-              </View>
-
-              {/* PR cards */}
-              {records.map((pr, i) => (
+              {/* Cardio PR cards — shown first so the newest feature gets
+                  top billing; each reuses the exact same prCard template
+                  as the strength cards below. */}
+              {hasCardioRecords && cardioItems.map((item, i) => (
                 <Animated.View
-                  key={pr.exercise_id}
+                  key={item.key}
                   style={[styles.prCard, {
-                    opacity: cardAnims[i] ?? 1,
+                    opacity: cardioCardAnims[i] ?? 1,
                     transform: [{
-                      translateY: (cardAnims[i] ?? new Animated.Value(1)).interpolate({
+                      translateY: (cardioCardAnims[i] ?? new Animated.Value(1)).interpolate({
                         inputRange: [0, 1], outputRange: [24, 0],
                       }),
                     }],
@@ -199,37 +291,32 @@ export default function PRHallScreen() {
                     start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
                   />
 
-                  {/* Background rune */}
-                  <Text style={styles.prBgRune}>{RUNES[i % RUNES.length]}</Text>
+                  <Text style={styles.prBgRune}>{item.rune}</Text>
 
-                  {/* Top row */}
                   <View style={styles.prTop}>
-                    <Text style={styles.prEyebrow}>FEAT OF STRENGTH · {formatDate(pr.achieved_at)}</Text>
+                    <Text style={styles.prEyebrow}>{item.eyebrow}</Text>
                   </View>
 
-                  {/* Main content */}
                   <View style={styles.prMain}>
-                    <Text style={styles.prName}>{pr.exercise_name}</Text>
+                    <Text style={styles.prName}>{item.name}</Text>
                     <View style={styles.prWeightRow}>
-                      <Text style={styles.prWeight}>{pr.best_weight}</Text>
+                      <Text style={styles.prWeight}>{item.heroValue}</Text>
                       <View style={styles.prWeightMeta}>
-                        <Text style={styles.prWeightUnit}>LBS</Text>
-                        <Text style={styles.prReps}>{pr.best_reps} REPS</Text>
+                        {!!item.heroUnit && <Text style={styles.prWeightUnit}>{item.heroUnit}</Text>}
+                        <Text style={styles.prReps}>{item.metaLine}</Text>
                       </View>
                     </View>
                   </View>
 
-                  {/* Runic divider */}
                   <View style={styles.prDivider}>
                     <View style={[styles.prDividerLine, { backgroundColor: 'rgba(201,168,76,0.15)' }]} />
                     <Text style={styles.prDividerRune}>ᚠ</Text>
                     <View style={[styles.prDividerLine, { backgroundColor: 'rgba(201,168,76,0.15)' }]} />
                   </View>
 
-                  {/* Share — prominent, social-ready */}
                   <TouchableOpacity
                     style={styles.shareBtn}
-                    onPress={() => handleShare(pr)}
+                    onPress={() => handleShareCardio(item)}
                     activeOpacity={0.85}
                   >
                     <LinearGradient
@@ -242,6 +329,103 @@ export default function PRHallScreen() {
                   </TouchableOpacity>
                 </Animated.View>
               ))}
+
+              {records.length > 0 && (
+                <>
+                  {/* Warrior banner */}
+                  <View style={styles.warriorBanner}>
+                    <LinearGradient colors={['rgba(201,168,76,0.1)', 'rgba(201,168,76,0.04)', 'transparent']} style={StyleSheet.absoluteFill} />
+                    <LinearGradient
+                      colors={['transparent', Colors.gold, 'transparent']}
+                      style={styles.bannerTopLine}
+                      start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                    />
+                    <View style={styles.bannerStat}>
+                      <Text style={styles.bannerStatVal}>{records.length}</Text>
+                      <Text style={styles.bannerStatLabel}>FEATS{'\n'}EARNED</Text>
+                    </View>
+                    <View style={styles.bannerDivider} />
+                    <View style={styles.bannerCenter}>
+                      <Text style={styles.bannerName}>{warrior?.name ?? 'WARRIOR'}</Text>
+                      <Text style={styles.bannerTitle}>EINHERJAR</Text>
+                    </View>
+                    <View style={styles.bannerDivider} />
+                    <View style={styles.bannerStat}>
+                      <Text style={styles.bannerStatVal}>
+                        {Math.max(...records.map(r => r.best_weight))}
+                      </Text>
+                      <Text style={styles.bannerStatLabel}>HEAVIEST{'\n'}LBS</Text>
+                    </View>
+                  </View>
+
+                  {/* PR cards */}
+                  {records.map((pr, i) => (
+                    <Animated.View
+                      key={pr.exercise_id}
+                      style={[styles.prCard, {
+                        opacity: cardAnims[i] ?? 1,
+                        transform: [{
+                          translateY: (cardAnims[i] ?? new Animated.Value(1)).interpolate({
+                            inputRange: [0, 1], outputRange: [24, 0],
+                          }),
+                        }],
+                      }]}
+                    >
+                      <LinearGradient
+                        colors={['rgba(201,168,76,0.07)', 'rgba(201,168,76,0.02)', 'transparent']}
+                        style={StyleSheet.absoluteFill}
+                      />
+                      <LinearGradient
+                        colors={['transparent', Colors.gold, 'transparent']}
+                        style={styles.prTopLine}
+                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                      />
+
+                      {/* Background rune */}
+                      <Text style={styles.prBgRune}>{RUNES[i % RUNES.length]}</Text>
+
+                      {/* Top row */}
+                      <View style={styles.prTop}>
+                        <Text style={styles.prEyebrow}>FEAT OF STRENGTH · {formatDate(pr.achieved_at)}</Text>
+                      </View>
+
+                      {/* Main content */}
+                      <View style={styles.prMain}>
+                        <Text style={styles.prName}>{pr.exercise_name}</Text>
+                        <View style={styles.prWeightRow}>
+                          <Text style={styles.prWeight}>{pr.best_weight}</Text>
+                          <View style={styles.prWeightMeta}>
+                            <Text style={styles.prWeightUnit}>LBS</Text>
+                            <Text style={styles.prReps}>{pr.best_reps} REPS</Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* Runic divider */}
+                      <View style={styles.prDivider}>
+                        <View style={[styles.prDividerLine, { backgroundColor: 'rgba(201,168,76,0.15)' }]} />
+                        <Text style={styles.prDividerRune}>ᚠ</Text>
+                        <View style={[styles.prDividerLine, { backgroundColor: 'rgba(201,168,76,0.15)' }]} />
+                      </View>
+
+                      {/* Share — prominent, social-ready */}
+                      <TouchableOpacity
+                        style={styles.shareBtn}
+                        onPress={() => handleShare(pr)}
+                        activeOpacity={0.85}
+                      >
+                        <LinearGradient
+                          colors={['rgba(201,168,76,0.12)', 'rgba(201,168,76,0.06)']}
+                          style={StyleSheet.absoluteFill}
+                          start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
+                        />
+                        <Text style={styles.shareIcon}>↑</Text>
+                        <Text style={styles.shareBtnText}>SHARE TO INSTAGRAM · TWITTER · X</Text>
+                      </TouchableOpacity>
+                    </Animated.View>
+                  ))}
+                </>
+              )}
 
               <View style={styles.bottomRunes}>
                 <Text style={styles.bottomRuneText}>ᚠ  ᚢ  ᚦ  ᚨ  ᚱ  ᚲ  ᚷ  ᚹ</Text>

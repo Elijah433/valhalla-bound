@@ -29,7 +29,17 @@ import {
   scheduleTrialEndReminder,
   handleNotificationTap,
   hasNotificationPermissions,
+  hasBeenPromptedForPermission,
+  requestPermissionsAndSchedule,
 } from '@/lib/notifications';
+
+// Side-effect only — this registers the background location task via
+// TaskManager.defineTask() at module scope. Must be imported unconditionally
+// here so the registration happens on EVERY app launch, including when iOS
+// relaunches the app silently in the background just to deliver a location
+// update with no UI ever shown. Nothing from this import is used directly
+// in this file.
+import '@/lib/runTracking';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -110,6 +120,36 @@ export default function RootLayout() {
         } catch (e) {
           console.warn('[Oath] Could not evaluate oath on launch:', e);
         }
+
+        // One-time notification permission prompt for users who onboarded
+        // before this prompt existed. New users are already covered at the
+        // end of the onboarding flow itself — this only fires for someone
+        // who's already past onboarding (isComplete true) and has never
+        // been asked before, so nobody sees two permission dialogs back to
+        // back and nobody gets asked more than once regardless of what
+        // they choose. Deliberately not awaited — the splash screen below
+        // hides as soon as the rest of launch prep finishes, and the OS
+        // permission dialog appears a moment later over the app itself,
+        // instead of holding the splash screen frozen while the person
+        // decides.
+        (async () => {
+          try {
+            const { isComplete: alreadyOnboarded } = useOnboardingStore.getState();
+            const alreadyPrompted = await hasBeenPromptedForPermission();
+            if (alreadyOnboarded && !alreadyPrompted) {
+              const freshWarrior = useWarriorStore.getState().warrior;
+              const gender = (await AsyncStorage.getItem('valhalla_gender')) ?? 'warrior';
+              await requestPermissionsAndSchedule(
+                freshWarrior?.name ?? 'Warrior',
+                freshWarrior?.streak_days ?? 0,
+                false,
+                gender === 'shieldmaiden',
+              );
+            }
+          } catch (e) {
+            console.warn('[Notifications] Could not run one-time permission prompt:', e);
+          }
+        })();
 
         await refreshNotifications();
 
@@ -271,6 +311,10 @@ export default function RootLayout() {
         />
         <Stack.Screen
           name="(modals)/cardio-log"
+          options={{ presentation: 'modal', animation: 'slide_from_bottom', headerShown: false }}
+        />
+        <Stack.Screen
+          name="(modals)/track-run"
           options={{ presentation: 'modal', animation: 'slide_from_bottom', headerShown: false }}
         />
         <Stack.Screen

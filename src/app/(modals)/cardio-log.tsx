@@ -27,6 +27,8 @@ const INTENSITY_LEVELS = [
   { id: 'max', label: 'MAX EFFORT', desc: 'Zone 5, all out war', color: Colors.blood },
 ];
 
+const METERS_PER_MILE = 1609.344;
+
 export default function CardioLogModal() {
  const params = useLocalSearchParams<{ type: string; noXp: string }>();
   const { recordWorkout } = useWarriorStore();
@@ -51,7 +53,20 @@ export default function CardioLogModal() {
   function handleLog() {
   if (!duration) return;
   if (params.noXp !== '1') {
-    recordWorkout(params.type === 'combat' ? 'combat' : 'endurance');
+    // Real numbers you actually typed — previously only the workout type
+    // made it to recordWorkout(); duration, distance, and notes were
+    // collected here and shown in the summary above, but never saved.
+    const durationMinutes = parseInt(duration, 10);
+    const distanceMiles = parseFloat(distance);
+    const distanceMeters = !isNaN(distanceMiles) && distanceMiles > 0
+      ? distanceMiles * METERS_PER_MILE
+      : undefined;
+    recordWorkout(
+      params.type === 'combat' ? 'combat' : 'endurance',
+      notes.trim() || undefined,
+      !isNaN(durationMinutes) ? durationMinutes : undefined,
+      distanceMeters
+    );
   }
   Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   router.back();
@@ -85,6 +100,25 @@ export default function CardioLogModal() {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+              {/* Track Live — only for outdoor types GPS actually makes
+                  sense for. Manual entry below stays the default/only
+                  option for row/swim/hiit/circuit/other. */}
+              {(cardioType === 'run' || cardioType === 'bike') && (
+                <TouchableOpacity
+                  style={styles.trackLiveBtn}
+                  onPress={() => router.replace({ pathname: '/(modals)/track-run' as any })}
+                  activeOpacity={0.85}
+                >
+                  <LinearGradient
+                    colors={[`${accentColor}10`, 'transparent']}
+                    style={StyleSheet.absoluteFill}
+                  />
+                  <Text style={[styles.trackLiveBtnText, { color: accentColor }]}>
+                    🏃  Track Live Instead →
+                  </Text>
+                </TouchableOpacity>
+              )}
 
               {/* Activity type */}
               <Text style={styles.sectionLabel}>DISCIPLINE</Text>
@@ -329,6 +363,21 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     marginBottom: 10,
     marginTop: 4,
+  },
+
+  trackLiveBtn: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    overflow: 'hidden',
+    marginBottom: Spacing.lg,
+  },
+  trackLiveBtnText: {
+    fontFamily: Fonts.subheading,
+    fontSize: 13,
+    letterSpacing: 0.5,
   },
 
   typeRow: {

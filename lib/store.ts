@@ -5,6 +5,7 @@ import {
   addXP,
   updateStreak,
   logWorkout,
+  logCardioRoute,
   getTodayWorkouts,
   getWorkoutCount,
   getTotalMiles,
@@ -19,6 +20,7 @@ import { dealBossDamage } from '@/lib/bossRaid';
 import { syncMyStatsIfInCrew } from '@/lib/crew';
 import { generateSagaEntry } from '@/lib/skald';
 import { checkAchievements, checkFrostShieldAchievement } from '@/lib/achievements';
+import { vacationCoversGapSince } from '@/lib/vacationMode';
 
 interface WeeklyStats {
   battles: number;
@@ -42,7 +44,14 @@ interface WarriorStore {
   streakBroken: boolean;
 
   loadWarrior: () => Promise<void>;
-  recordWorkout: (type: WorkoutType, notes?: string, duration?: number) => number;
+  recordWorkout: (
+    type: WorkoutType,
+    notes?: string,
+    duration?: number,
+    distanceMeters?: number,
+    routePoints?: { lat: number; lng: number; t: number }[] | null,
+    isGpsTracked?: boolean
+  ) => number;
   setName: (name: string) => void;
   setPro: (val: boolean) => void;
   checkStreakOnOpen: () => Promise<{ broken: boolean; shieldUsed: boolean; weeklySagaReady: boolean }>;
@@ -160,16 +169,39 @@ export const useWarriorStore = create<WarriorStore>((set, get) => ({
       workoutCount,
       totalMiles,
       streakDays: warrior?.streak_days ?? 0,
-      // isPro: warrior?.is_pro === 1,
-      isPro: true
-     
+       isPro: warrior?.is_pro === 1,
+
+
+
+
     });
   },
 
-  recordWorkout: (type: WorkoutType, notes?: string, duration?: number) => {
+  recordWorkout: (
+    type: WorkoutType,
+    notes?: string,
+    duration?: number,
+    distanceMeters?: number,
+    routePoints?: { lat: number; lng: number; t: number }[] | null,
+    isGpsTracked?: boolean
+  ) => {
     const xp = WORKOUT_XP[type];
-    const miles = type === 'endurance' ? (duration ? duration / 10 : 2) : 0;
-    logWorkout(type, xp, notes, duration);
+    const workoutId = logWorkout(type, xp, notes, duration);
+
+    // Real distance (typed manually or captured live via GPS) is now the
+    // source of truth when we have it — only fall back to the old
+    // duration/10-or-flat-2 guess when no real distance was passed at all,
+    // so existing call sites that don't pass distance yet keep behaving
+    // exactly as before.
+    const METERS_PER_MILE = 1609.344;
+    let miles: number;
+    if (distanceMeters != null && distanceMeters > 0) {
+      miles = distanceMeters / METERS_PER_MILE;
+      logCardioRoute(workoutId, distanceMeters, routePoints ?? null, !!isGpsTracked);
+    } else {
+      miles = type === 'endurance' ? (duration ? duration / 10 : 2) : 0;
+    }
+
     addXP(xp);
     updateStreak();
     const updatedWarrior = getWarrior();
@@ -329,6 +361,20 @@ export const useWarriorStore = create<WarriorStore>((set, get) => ({
 
       // Trained today or yesterday — streak safe
       if (diffDays <= 1) {
+        return { broken: false, shieldUsed: false, weeklySagaReady };
+      }
+
+      // Vacation Mode — a deliberate, planned break, not a random missed-day
+      // safety net (that's what Frost Shields are for). Protects the streak
+      // for free, for every warrior regardless of Pro status — the whole
+      // point is stopping "I missed a few days on a trip, my streak's
+      // gone, why bother reopening the app" churn, and that risk isn't
+      // unique to Pro subscribers. vacationCoversGapSince() also guards
+      // against starting a vacation AFTER the streak had already lapsed —
+      // it only protects days actually covered by the vacation window, see
+      // its own comment in lib/vacationMode.ts for why that matters.
+      if (await vacationCoversGapSince(lastWorkoutDate)) {
+        await AsyncStorage.setItem('last_workout_date', getLocalDateString());
         return { broken: false, shieldUsed: false, weeklySagaReady };
       }
 
