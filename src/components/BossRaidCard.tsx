@@ -8,6 +8,7 @@ import {
   subscribeToBossRaid,
   type BossRaid,
 } from '@/lib/bossRaid';
+import { getSeasonalTheme } from '@/lib/weeklyTrial';
 
 // ── Boss portraits — AI-generated art per boss, indexed to match BOSS_ROSTER ──
 const BOSS_IMAGES = [
@@ -87,11 +88,12 @@ export default function BossRaidCard({ crewId, memberCount }: Props) {
       useNativeDriver: false,
     }).start();
   }, [raid?.current_hp, raid?.max_hp]);
-
   if (!raid) return null;
 
   const boss = BOSS_ROSTER[raid.boss_index % BOSS_ROSTER.length];
   const isDefeated = raid.status === 'defeated';
+  const seasonalTheme = getSeasonalTheme();
+  const accentColor = seasonalTheme?.color ?? boss.color;
   const fillWidth = fillAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ['0%', '100%'],
@@ -99,34 +101,41 @@ export default function BossRaidCard({ crewId, memberCount }: Props) {
   const hpPct = Math.round((raid.current_hp / raid.max_hp) * 100);
 
   return (
-    <View style={[styles.card, { borderColor: `${boss.color}35` }]}>
+    <View style={[styles.card, { borderColor: `${accentColor}35` }]}>
       <LinearGradient
-        colors={[`${boss.color}12`, 'transparent']}
+        colors={[`${accentColor}12`, 'transparent']}
         style={StyleSheet.absoluteFill}
       />
       <LinearGradient
-        colors={['transparent', boss.color, 'transparent']}
+        colors={['transparent', accentColor, 'transparent']}
         style={styles.topLine}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
       />
 
       <View style={styles.header}>
-        <View style={[styles.iconWrap, { borderColor: `${boss.color}40`, backgroundColor: `${boss.color}12` }]}>
+        <View style={[styles.iconWrap, { borderColor: `${accentColor}40`, backgroundColor: `${accentColor}12` }]}>
           <BossIcon index={raid.boss_index} size={48} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.eyebrow}>BOSS RAID</Text>
+          <Text style={styles.eyebrow}>
+            BOSS RAID{seasonalTheme ? ` · ${seasonalTheme.label}` : ''}
+          </Text>
           <Text style={[styles.bossName, { color: boss.color }]}>{boss.name}</Text>
         </View>
         {isDefeated && (
-          <View style={[styles.slainBadge, { borderColor: `${boss.color}50` }]}>
-            <Text style={[styles.slainText, { color: boss.color }]}>SLAIN</Text>
+          <View style={[styles.slainBadge, { borderColor: `${accentColor}50` }]}>
+            <Text style={[styles.slainText, { color: accentColor }]}>SLAIN</Text>
           </View>
         )}
       </View>
 
       <Text style={styles.lore}>{boss.lore}</Text>
+      {seasonalTheme && !isDefeated && (
+        <Text style={[styles.lore, { color: accentColor, opacity: 0.85, marginTop: -6 }]}>
+          The veil grows thin — {seasonalTheme.rune} the Wild Hunt rides close behind this foe.
+        </Text>
+      )}
 
       {/* Health bar */}
       <View style={styles.healthTrack}>

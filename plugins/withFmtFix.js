@@ -4,7 +4,7 @@ const path = require('path');
 
 // Keep in sync with the `expo-build-properties` → ios.deploymentTarget
 // value in app.json.
-const IOS_DEPLOYMENT_TARGET = '15.1';
+const IOS_DEPLOYMENT_TARGET = '16.4';
 
 const PATCH_START = '# >>> withFmtFix';
 const PATCH_END = '# <<< withFmtFix';

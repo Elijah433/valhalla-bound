@@ -1103,6 +1103,41 @@ export function getWorkoutTypesThisWeek(): string[] {
   const thisWeek = all.filter(w => utcTimestampToLocalDateString(w.created_at) >= weekStartStr);
   return Array.from(new Set(thisWeek.map(w => w.type)));
 }
+// Shared building block for this week's stats — same Sunday-start, local-
+// calendar-day boundary as getWorkoutTypesThisWeek() above, so every
+// "this week" figure in the app agrees with every other one.
+function getThisWeekWorkouts(): Workout[] {
+  const db = getDb();
+  const now = new Date();
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - now.getDay());
+  weekStart.setHours(0, 0, 0, 0);
+  const weekStartStr = getLocalDateString(weekStart);
+
+  const all = db.getAllSync<Workout>(
+    "SELECT * FROM workouts WHERE created_at >= datetime('now', '-8 days') ORDER BY created_at DESC"
+  );
+  return all.filter(w => utcTimestampToLocalDateString(w.created_at) >= weekStartStr);
+}
+
+// Powers the Weekly Trial banner on Home — one query, all four metrics a
+// challenge template might target.
+export function getWeeklyTrialStats(): {
+  workoutsThisWeek: number;
+  xpThisWeek: number;
+  daysTrainedThisWeek: number;
+  categoriesThisWeek: number;
+} {
+  const workouts = getThisWeekWorkouts();
+  const days = new Set(workouts.map(w => utcTimestampToLocalDateString(w.created_at)));
+  const categories = new Set(workouts.map(w => w.type));
+  return {
+    workoutsThisWeek: workouts.length,
+    xpThisWeek: workouts.reduce((sum, w) => sum + w.xp_earned, 0),
+    daysTrainedThisWeek: days.size,
+    categoriesThisWeek: categories.size,
+  };
+}
 // ── BODY MEASUREMENTS ─────────────────────────────────────────
 // Same pattern as the existing weight-logging functions — a defensive
 // CREATE TABLE IF NOT EXISTS (safe to run on every launch), plus

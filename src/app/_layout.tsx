@@ -252,9 +252,9 @@ export default function RootLayout() {
       }, 1000);
     });
 
-    return () => {
-      Notifications.removeNotificationSubscription(notificationListener.current);
-      Notifications.removeNotificationSubscription(responseListener.current);
+     return () => {
+      notificationListener.current?.remove();
+      responseListener.current?.remove();
     };
   }, []);
 

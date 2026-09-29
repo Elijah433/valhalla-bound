@@ -347,6 +347,7 @@ export default function ProfileScreen() {
     { label: 'Your Saga', icon: 'ᛋ', action: () => router.push('/(tabs)/sagas' as any) },
     { label: 'Workout History', icon: 'ᛉ', action: () => router.push('/(modals)/workout-history' as any) },
     { label: 'Achievements', icon: 'ᚹ', action: () => router.push('/(modals)/achievements-hall' as any) },
+    { label: 'Hall of Legends', icon: 'ᛚ', action: () => router.push('/(modals)/hall-of-legends' as any) },
     { label: 'The Crew', icon: 'ᚢ', action: () => router.push('/(tabs)/crew' as any) },
     { label: 'My Rune', icon: 'ᛟ', action: () => router.push('/(modals)/character-creator' as any) },
     { label: 'Gear Guide', icon: 'ᚦ', action: () => router.push('/(modals)/gear-guide' as any) },

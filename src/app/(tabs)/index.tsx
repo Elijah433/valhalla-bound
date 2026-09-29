@@ -16,9 +16,12 @@ import { StreakFlame } from '../../components/StreakFlame';
 import { Colors, Fonts, Spacing, Radii } from '@/constants/theme';
 import { useWarriorProfile } from '@/lib/useWarriorProfile';
 import { getRecentSagaEntries, cleanSagaText, type SagaEntry, logRavenCheckin, getTodayRavenCheckin, getRecentRavenCheckins, type RavenCheckin, addXP } from '@/lib/db';
+import { getTrialProgress, isTrialClaimedThisWeek, claimTrialReward, getSeasonalTheme, WEEKLY_TRIAL_REWARD_XP, recordLegend, getLegends, formatTrialResult, type TrialProgress, type LegendEntry } from '@/lib/weeklyTrial';
 import {
   TRIP_PROFILES, getTripProfile, startVacation, endVacation, getActiveVacation,
-  daysRemaining, type TripType, type VacationState,
+  getVacationMission, getReturnMission, getVacationCount, getLastTripType,
+  tripDayProgress, extendVacation,
+  daysRemaining, type TripType, type VacationState, type Mission,
 } from '@/lib/vacationMode';
 const { width, height } = Dimensions.get('window');
 
@@ -253,32 +256,48 @@ export default function HomeScreen() {
   const [vacation, setVacationState] = useState<VacationState | null>(null);
   const [vacationPanelOpen, setVacationPanelOpen] = useState(false);
   const [pendingTripType, setPendingTripType] = useState<TripType | null>(null);
+   const [returnMission, setReturnMission] = useState<Mission | null>(null);
+  const [vacationCount, setVacationCount] = useState(0);
+  const [lastTripType, setLastTripType] = useState<TripType | null>(null);
+  const [confirmEnd, setConfirmEnd] = useState(false);
+  const [trialProgress, setTrialProgress] = useState<TrialProgress | null>(null);
+  const [trialClaimed, setTrialClaimed] = useState(false);
+  const [trialPanelOpen, setTrialPanelOpen] = useState(false);
 const { isShieldmaiden } = useWarriorProfile();
   const fadeAnim        = useRef(new Animated.Value(0)).current;
   const runeAnim        = useRef(new Animated.Value(0)).current;
   const missionAnim     = useRef(new Animated.Value(0)).current;
   const xpAnim          = useRef(new Animated.Value(0)).current;
   const toastAnim       = useRef(new Animated.Value(0)).current;
-  const havamolAnim     = useRef(new Animated.Value(0)).current;
+   const havamolAnim     = useRef(new Animated.Value(0)).current;
+  const trialOrbAnim    = useRef(new Animated.Value(0)).current;
   const [havamolVerse, setHavamolVerse] = useState<{ num: number; text: string } | null>(null);
   const xp          = warrior?.total_xp ?? 0;
   const rank        = getRank(xp);
   const streakDays  = warrior?.streak_days ?? 0;
   const baseMission = getMission(activeProgram, completedDays);
   const tripProfile = vacation ? getTripProfile(vacation.tripType) : null;
-  const mission     = vacation && tripProfile
-    ? { ...tripProfile.mission, color: Colors.ice, programId: null, isCompleted: false }
+  const tripProgress = vacation ? tripDayProgress(vacation) : null;
+  const vacationMission = vacation ? getVacationMission(vacation) : null;
+  const mission = vacationMission
+    ? { ...vacationMission, color: Colors.ice, programId: null, isCompleted: false }
+    : returnMission
+    ? { ...returnMission, color: TYPE_COLORS[returnMission.type], programId: null, isCompleted: false }
     : baseMission;
   const trainedToday = todayWorkouts.length > 0;
   const xpPct       = Math.round(rank.progress * 100);
 const accentColor = isShieldmaiden ? '#D4A8C4' : Colors.gold;
+const seasonalTheme = getSeasonalTheme();
+  const trialColor = seasonalTheme?.color ?? Colors.gold;
+  const trialAccent = seasonalTheme?.accent ?? '#B8860B';
 useFocusEffect(useCallback(() => {
     loadWarrior();
     loadProgramState();
     loadCrewState();
     loadChronicleState();
-    loadRavenState();
+       loadRavenState();
     loadVacationState();
+    loadWeeklyTrialState();
     setTimeout(() => checkNewVerse(), 300);
   }, [isPro]));
   async function loadProgramState() {
@@ -318,10 +337,29 @@ useFocusEffect(useCallback(() => {
       setRavenHistory([]);
     }
   }
+    async function loadWeeklyTrialState() {
+    try {
+      setTrialProgress(getTrialProgress());
+      setTrialClaimed(await isTrialClaimedThisWeek());
+    } catch (e) {}
+  }
+
+  async function handleClaimTrial() {
+    if (!trialProgress?.complete || trialClaimed) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    await claimTrialReward();
+    addXP(WEEKLY_TRIAL_REWARD_XP);
+    loadWarrior();
+    setTrialClaimed(true);
+  }
 
   async function loadVacationState() {
     try {
-      setVacationState(await getActiveVacation());
+      const active = await getActiveVacation();
+      setVacationState(active);
+      setReturnMission(active ? null : await getReturnMission());
+      setVacationCount(await getVacationCount());
+      setLastTripType(await getLastTripType());
     } catch (e) {}
   }
 
@@ -330,6 +368,9 @@ useFocusEffect(useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     startVacation(pendingTripType, days).then(state => {
       setVacationState(state);
+      setReturnMission(null);
+      setLastTripType(pendingTripType);
+      setVacationCount(c => c + 1);
       setVacationPanelOpen(false);
       setPendingTripType(null);
     });
@@ -340,9 +381,26 @@ useFocusEffect(useCallback(() => {
     endVacation().then(() => {
       setVacationState(null);
       setVacationPanelOpen(false);
+      setConfirmEnd(false);
     });
   }
 
+  function handleEndVacationPress() {
+    if (!confirmEnd) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setConfirmEnd(true);
+      setTimeout(() => setConfirmEnd(false), 4000);
+      return;
+    }
+    handleEndVacation();
+  }
+
+  function handleExtendVacation(days: number) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    extendVacation(days).then(state => {
+      if (state) setVacationState(state);
+    });
+  }
   function ravenMoodColor(mood: string): string {
     if (mood.includes('Triumphant')) return Colors.gold;
     if (mood.includes('Steady'))     return Colors.ice;
@@ -398,7 +456,7 @@ useFocusEffect(useCallback(() => {
     } catch (e) {}
   }
 
-  useEffect(() => {
+   useEffect(() => {
     Animated.parallel([
       Animated.timing(fadeAnim,    { toValue: 1,            duration: 700,  useNativeDriver: true }),
       Animated.timing(runeAnim,    { toValue: 1,            duration: 2000, useNativeDriver: true }),
@@ -406,6 +464,17 @@ useFocusEffect(useCallback(() => {
       Animated.timing(xpAnim,      { toValue: rank.progress, duration: 1600, delay: 600, useNativeDriver: false }),
     ]).start();
   }, [xp]);
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(trialOrbAnim, { toValue: 1, duration: 1400, useNativeDriver: true }),
+        Animated.timing(trialOrbAnim, { toValue: 0, duration: 1400, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
 
   useEffect(() => {
   if (isPro) { setShowUpsell(false); return; }
@@ -491,7 +560,7 @@ async function dismissUpsell() {
           <View style={styles.header}>
             <View style={styles.headerLeft}>
               <Text style={styles.greeting}>{getGreeting()}</Text>
-              <Text style={styles.warriorName} numberOfLines={1} adjustsFontSizeToFit>
+              <Text style={styles.warriorName} numberOfLines={1}>
                 {warrior?.name ?? 'Warrior'}
               </Text>
             </View>
@@ -523,26 +592,152 @@ async function dismissUpsell() {
                 </TouchableOpacity>
               </View>
             </View>
-          </View>
+                   </View>
 
-          {/* ── VACATION MODE BANNER (active only) ── */}
-          {vacation && tripProfile && (
+          {/* ── WEEKLY TRIAL ORB ── */}
+                      {trialProgress && (
             <TouchableOpacity
-              style={styles.vacationBanner}
-              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setVacationPanelOpen(o => !o); }}
-              activeOpacity={0.85}
+              style={[styles.trialBanner, { borderColor: `${trialColor}50`, shadowColor: trialColor }]}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setTrialPanelOpen(o => !o); }}
+              activeOpacity={0.9}
             >
-              <LinearGradient colors={['rgba(168,196,212,0.1)', 'rgba(168,196,212,0.03)', 'transparent']} style={StyleSheet.absoluteFill} />
-              <Text style={styles.vacationBannerIcon}>{tripProfile.rune}</Text>
+              <View style={styles.trialBannerClip}>
+                <LinearGradient colors={[`${trialColor}22`, 'transparent', `${trialAccent}12`]} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
+                <LinearGradient colors={[`${trialAccent}18`, 'transparent', `${trialColor}10`]} style={StyleSheet.absoluteFill} start={{ x: 1, y: 0 }} end={{ x: 0, y: 1 }} />
+                <LinearGradient colors={['transparent', trialColor, 'transparent']} style={styles.trialBannerTopLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+                <View style={styles.trialInnerEngrave} pointerEvents="none" />
+
+                <Text style={[styles.trialWatermarkRune, { color: trialColor }]} pointerEvents="none">
+                  {seasonalTheme?.rune ?? trialProgress.trial.rune}
+                </Text>
+
+                <View style={[styles.trialCornerTL, { borderColor: `${trialAccent}90` }]} pointerEvents="none" />
+                <View style={[styles.trialCornerTR, { borderColor: `${trialAccent}90` }]} pointerEvents="none" />
+                <View style={[styles.trialCornerBL, { borderColor: `${trialAccent}90` }]} pointerEvents="none" />
+                <View style={[styles.trialCornerBR, { borderColor: `${trialAccent}90` }]} pointerEvents="none" />
+
+                <View style={[styles.trialConstellationDot, { top: 10, right: 74, backgroundColor: trialColor, opacity: 0.14 }]} />
+                <View style={[styles.trialConstellationDot, { top: 26, right: 52, backgroundColor: trialColor, opacity: 0.2 }]} />
+                <View style={[styles.trialConstellationDot, { top: 15, right: 32, backgroundColor: trialColor, opacity: 0.1 }]} />
+                <View style={[styles.trialConstellationDot, { top: 34, right: 16, backgroundColor: trialColor, opacity: 0.16 }]} />
+              </View>
+
+              <View style={styles.trialOrbWrap}>
+                <View style={[styles.trialCompassV, { backgroundColor: trialColor }]} />
+                <View style={[styles.trialCompassH, { backgroundColor: trialColor }]} />
+                <Animated.View style={[styles.trialOrbGlow, {
+                  backgroundColor: trialColor,
+                  opacity: trialOrbAnim.interpolate({ inputRange: [0, 1], outputRange: [0.28, 0.55] }),
+                  transform: [{ scale: trialOrbAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.22] }) }],
+                }]} />
+                <View style={[styles.trialOrb, { borderColor: `${trialAccent}95` }]}>
+                  <LinearGradient colors={[trialColor, trialAccent]} style={StyleSheet.absoluteFill} start={{ x: 0.15, y: 0 }} end={{ x: 0.85, y: 1 }} />
+                  <View style={styles.trialOrbInnerRing} />
+                  <LinearGradient colors={['rgba(255,255,255,0.3)', 'transparent']} style={styles.trialOrbSheen} start={{ x: 0.1, y: 0 }} end={{ x: 0.6, y: 0.8 }} />
+                  <Text style={styles.trialOrbRune}>{seasonalTheme?.rune ?? trialProgress.trial.rune}</Text>
+                </View>
+              </View>
+
               <View style={{ flex: 1 }}>
-                <Text style={styles.vacationBannerEyebrow}>ON VACATION · {tripProfile.chipLabel}</Text>
-                <Text style={styles.vacationBannerSub}>
-                  Streak protected · {daysRemaining(vacation)} {daysRemaining(vacation) === 1 ? 'day' : 'days'} left
+                <Text style={[styles.trialBannerEyebrow, { color: trialColor }]}>
+                  {seasonalTheme ? seasonalTheme.label : 'WEEKLY TRIAL'}
+                </Text>
+                <Text style={styles.trialBannerTitle}>{trialProgress.trial.title}</Text>
+                <Text style={styles.trialBannerSub}>
+                  {trialClaimed ? 'Claimed — new trial next week' : trialProgress.trial.description}
                 </Text>
               </View>
-              <Text style={styles.vacationBannerArrow}>{vacationPanelOpen ? '▲' : '▼'}</Text>
+
+              {!trialClaimed && (
+                <View style={[styles.trialStatBadge, { borderColor: `${trialAccent}50`, backgroundColor: `${trialColor}16` }]}>
+                  <Text style={[styles.trialStatBadgeVal, { color: trialColor }]}>{trialProgress.current}</Text>
+                  <Text style={styles.trialStatBadgeSep}>/{trialProgress.trial.target}</Text>
+                </View>
+              )}
+              <Text style={[styles.trialBannerArrow, { color: trialColor }]}>{trialPanelOpen ? '▲' : '▼'}</Text>
             </TouchableOpacity>
           )}
+
+        {trialPanelOpen && trialProgress && (
+          <View style={[styles.trialCard, { borderColor: `${trialColor}50` }]}>
+            <View style={styles.trialCardClip}>
+              <LinearGradient colors={[`${trialColor}20`, 'transparent', `${trialAccent}10`]} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
+              <LinearGradient colors={[`${trialAccent}16`, 'transparent', `${trialColor}0C`]} style={StyleSheet.absoluteFill} start={{ x: 1, y: 0 }} end={{ x: 0, y: 1 }} />
+              <LinearGradient colors={['transparent', trialColor, 'transparent']} style={styles.trialTopLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+              <View style={styles.trialCardInnerEngrave} pointerEvents="none" />
+              <Text style={[styles.trialCardWatermarkRune, { color: trialColor }]} pointerEvents="none">
+                {seasonalTheme?.rune ?? trialProgress.trial.rune}
+              </Text>
+              <View style={[styles.trialCornerTL, { borderColor: `${trialAccent}90`, top: 7, left: 7 }]} pointerEvents="none" />
+              <View style={[styles.trialCornerTR, { borderColor: `${trialAccent}90`, top: 7, right: 7 }]} pointerEvents="none" />
+              <View style={[styles.trialCornerBL, { borderColor: `${trialAccent}90`, bottom: 7, left: 7 }]} pointerEvents="none" />
+              <View style={[styles.trialCornerBR, { borderColor: `${trialAccent}90`, bottom: 7, right: 7 }]} pointerEvents="none" />
+            </View>
+
+            <View style={styles.trialCardSealWrap}>
+              <View style={[styles.trialCardSeal, { borderColor: `${trialAccent}95` }]}>
+                <LinearGradient colors={[trialColor, trialAccent]} style={StyleSheet.absoluteFill} start={{ x: 0.15, y: 0 }} end={{ x: 0.85, y: 1 }} />
+                <View style={styles.trialOrbInnerRing} />
+                <LinearGradient colors={['rgba(255,255,255,0.3)', 'transparent']} style={styles.trialOrbSheen} start={{ x: 0.1, y: 0 }} end={{ x: 0.6, y: 0.8 }} />
+                <Text style={styles.trialCardSealRune}>{seasonalTheme?.rune ?? trialProgress.trial.rune}</Text>
+              </View>
+            </View>
+
+            <Text style={[styles.trialEyebrow, { color: trialColor, textAlign: 'center' }]}>
+              {seasonalTheme ? seasonalTheme.label : 'WEEKLY TRIAL'}
+            </Text>
+            <Text style={styles.trialCardTitle}>{trialProgress.trial.title}</Text>
+            <Text style={[styles.trialPromptText, { textAlign: 'center' }]}>{trialProgress.trial.description}</Text>
+
+            <View style={styles.trialProgressTrack}>
+              <View style={[styles.trialProgressFill, { width: `${Math.min(100, (trialProgress.current / trialProgress.trial.target) * 100)}%`, backgroundColor: trialColor }]} />
+            </View>
+            <Text style={[styles.trialProgressLabel, { textAlign: 'center' }]}>{trialProgress.current} / {trialProgress.trial.target}</Text>
+
+            {trialClaimed ? (
+              <Text style={styles.trialClaimedText}>Claimed — a new trial rises next week</Text>
+            ) : trialProgress.complete ? (
+              <TouchableOpacity style={[styles.trialClaimBtn, { borderColor: `${trialAccent}90` }]} onPress={handleClaimTrial} activeOpacity={0.85}>
+                <LinearGradient colors={[trialColor, trialAccent]} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
+                <Text style={[styles.trialClaimBtnText, { color: Colors.void }]}>CLAIM · +{WEEKLY_TRIAL_REWARD_XP} VALOR</Text>
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.trialClaimedText}>{trialProgress.trial.target - trialProgress.current} more to complete this trial</Text>
+            )}
+          </View>
+        )}
+
+          {/* ── VACATION MODE BANNER ── */}
+          <TouchableOpacity
+            style={styles.vacationBanner}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              if (!vacation && !pendingTripType && lastTripType) setPendingTripType(lastTripType);
+              setVacationPanelOpen(o => !o);
+            }}
+            activeOpacity={0.85}
+          >
+            <LinearGradient colors={['rgba(168,196,212,0.1)', 'rgba(168,196,212,0.03)', 'transparent']} style={StyleSheet.absoluteFill} />
+            <Text style={styles.vacationBannerIcon}>{vacation && tripProfile ? tripProfile.rune : 'ᛚ'}</Text>
+            <View style={{ flex: 1 }}>
+              {vacation && tripProfile ? (
+                <>
+                  <Text style={styles.vacationBannerEyebrow}>ON VACATION · {tripProfile.chipLabel}</Text>
+                  <Text style={styles.vacationBannerSub}>
+                    Protecting your {streakDays}-day streak · {daysRemaining(vacation)} {daysRemaining(vacation) === 1 ? 'day' : 'days'} left
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.vacationBannerEyebrow}>GOING SOMEWHERE?</Text>
+                  <Text style={styles.vacationBannerSub}>
+                    {vacationCount > 0 ? `Plan your ${ordinal(vacationCount + 1)} protected trip` : 'Plan Vacation Mode — protect your streak on the trip'}
+                  </Text>
+                </>
+              )}
+            </View>
+            <Text style={styles.vacationBannerArrow}>{vacationPanelOpen ? '▲' : '▼'}</Text>
+          </TouchableOpacity>
 
           {/* ── MISSION CARD — dominant ── */}
           <Animated.View style={[styles.missionCard, {
@@ -563,8 +758,8 @@ async function dismissUpsell() {
               style={styles.missionLine}
               start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
             />
-            <Text style={[styles.missionEyebrow, { color: vacation ? Colors.ice : (trainedToday ? '#4CAF50' : mission.color) }]}>
-              {vacation ? 'ON VACATION' : (trainedToday ? 'WORKOUT COMPLETE' : "TODAY'S WORKOUT")}
+              <Text style={[styles.missionEyebrow, { color: vacation ? Colors.ice : (trainedToday ? '#4CAF50' : mission.color) }]}>
+                {vacation && tripProgress ? `ON VACATION · DAY ${tripProgress.day} OF ${tripProgress.total}` : returnMission ? 'WELCOME BACK' : (trainedToday ? 'WORKOUT COMPLETE' : "TODAY'S WORKOUT")}
             </Text>
             <View style={styles.missionTitleRow}>
               <Text style={styles.missionTitle}>{mission.title}</Text>
@@ -602,14 +797,22 @@ async function dismissUpsell() {
               <LinearGradient colors={['rgba(168,196,212,0.06)', 'transparent']} style={StyleSheet.absoluteFill} />
               <LinearGradient colors={['transparent', Colors.ice, 'transparent']} style={styles.vacationTopLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
 
-              {vacation ? (
+                            {vacation ? (
                 <View>
                   <Text style={styles.vacationEyebrow}>CURRENTLY AWAY</Text>
                   <Text style={styles.vacationPromptText}>
                     Your streak stays safe the whole trip — no shield spent, nothing to remember. Back early? End it below.
                   </Text>
-                  <TouchableOpacity style={styles.vacationEndBtn} onPress={handleEndVacation} activeOpacity={0.8}>
-                    <Text style={styles.vacationEndBtnText}>END VACATION EARLY</Text>
+                  <Text style={[styles.vacationEyebrow, { marginTop: 4 }]}>NEED MORE TIME?</Text>
+                  <View style={styles.vacationDaysRow}>
+                    {[3, 5, 7].map((d) => (
+                      <TouchableOpacity key={d} style={styles.vacationDayBtn} onPress={() => handleExtendVacation(d)} activeOpacity={0.8}>
+                        <Text style={styles.vacationDayBtnText}>+{d} DAYS</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <TouchableOpacity style={[styles.vacationEndBtn, { marginTop: 10 }]} onPress={handleEndVacationPress} activeOpacity={0.8}>
+                    <Text style={styles.vacationEndBtnText}>{confirmEnd ? 'TAP AGAIN TO CONFIRM' : 'END VACATION EARLY'}</Text>
                   </TouchableOpacity>
                 </View>
               ) : (
@@ -918,6 +1121,12 @@ function getGreeting() {
   return 'Good evening,';
 }
 
+function ordinal(n: number): string {
+  const suffixes = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return `${n}${suffixes[(v - 20) % 10] ?? suffixes[v] ?? suffixes[0]}`;
+}
+
 const styles = StyleSheet.create({
   root:    { flex: 1, backgroundColor: '#050508' },
   safe:    { flex: 1 },
@@ -925,7 +1134,7 @@ const styles = StyleSheet.create({
   content: { paddingBottom: 110 },
 
   topHaze:   { position: 'absolute', top: 0, left: 0, right: 0, height: height * 0.4, zIndex: 0 },
-  runeField: { ...StyleSheet.absoluteFillObject, zIndex: 0 },
+  runeField: { ...StyleSheet.absoluteFill, zIndex: 0 },
   bgRune:    { position: 'absolute', color: Colors.gold, fontFamily: 'System' },
 
   toast: {
@@ -970,13 +1179,91 @@ const styles = StyleSheet.create({
   crewLeaderDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: Colors.gold, marginLeft: 2 },
   proChip: { borderRadius: Radii.full, overflow: 'hidden', paddingHorizontal: 14, paddingVertical: 7, flexShrink: 0 },
   proChipText: { fontFamily: Fonts.body, fontSize: 10, color: Colors.void, letterSpacing: 2 },
-
-  vacationBanner: {
+  trialBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginHorizontal: Spacing.lg, marginBottom: 10,
+    borderWidth: 1.5, borderRadius: 18,
+    backgroundColor: 'rgba(22,18,14,0.97)',
+    paddingHorizontal: Spacing.md, paddingVertical: 13,
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.26, shadowRadius: 14,
+  },
+  trialBannerClip: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 16.5, overflow: 'hidden' },
+  trialBannerTopLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 1.5 },
+  trialInnerEngrave: { position: 'absolute', top: 3, left: 3, right: 3, bottom: 3, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  trialWatermarkRune: { position: 'absolute', bottom: -18, right: -6, fontSize: 88, fontFamily: 'System', opacity: 0.045 },
+  trialCornerTL: { position: 'absolute', top: 5, left: 5, width: 12, height: 12, borderTopWidth: 1.25, borderLeftWidth: 1.25 },
+  trialCornerTR: { position: 'absolute', top: 5, right: 5, width: 12, height: 12, borderTopWidth: 1.25, borderRightWidth: 1.25 },
+  trialCornerBL: { position: 'absolute', bottom: 5, left: 5, width: 12, height: 12, borderBottomWidth: 1.25, borderLeftWidth: 1.25 },
+  trialCornerBR: { position: 'absolute', bottom: 5, right: 5, width: 12, height: 12, borderBottomWidth: 1.25, borderRightWidth: 1.25 },
+  trialConstellationDot: { position: 'absolute', width: 2, height: 2, borderRadius: 1 },
+  trialOrbWrap: { width: 52, height: 52, alignItems: 'center', justifyContent: 'center' },
+  trialCompassV: { position: 'absolute', width: 1, height: 84, top: -16, left: '50%', marginLeft: -0.5, opacity: 0.07 },
+  trialCompassH: { position: 'absolute', width: 84, height: 1, left: -16, top: '50%', marginTop: -0.5, opacity: 0.07 },
+  trialOrbGlow: { position: 'absolute', width: 52, height: 52, borderRadius: 26 },
+  trialOrb: {
+    width: 46, height: 46, borderRadius: 23,
+    borderWidth: 1.5, overflow: 'hidden',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  trialOrbInnerRing: { position: 'absolute', top: 3, left: 3, right: 3, bottom: 3, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)' },
+  trialOrbSheen: { position: 'absolute', top: 0, left: 0, right: 0, height: '55%' },
+  trialOrbRune: {
+    fontSize: 20, fontFamily: 'System', color: Colors.void,
+    textShadowColor: 'rgba(0,0,0,0.4)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 1,
+  },
+  trialBannerEyebrow: { fontFamily: Fonts.body, fontSize: 8, letterSpacing: 2.5, marginBottom: 2 },
+  trialBannerTitle: {
+    fontFamily: Fonts.heading, fontSize: 16, color: Colors.text, letterSpacing: 1.1, marginBottom: 2,
+    textTransform: 'uppercase',
+    textShadowColor: 'rgba(0,0,0,0.55)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 1,
+  },
+  trialBannerSub: { fontFamily: Fonts.prose, fontSize: 11, color: Colors.textMuted },
+  trialStatBadge: {
+    flexDirection: 'row', alignItems: 'baseline',
+    borderWidth: 1, borderRadius: 8,
+    paddingHorizontal: 8, paddingVertical: 4,
+  },
+  trialStatBadgeVal: { fontFamily: Fonts.heading, fontSize: 13 },
+  trialStatBadgeSep: { fontFamily: Fonts.body, fontSize: 10, color: Colors.textMuted },
+  trialBannerArrow: { fontFamily: Fonts.body, fontSize: 10, opacity: 0.7 },
+  trialCard: {
+    marginHorizontal: Spacing.lg, marginBottom: 10,
+    borderWidth: 1, borderRadius: 18, overflow: 'hidden',
+    backgroundColor: 'rgba(22,18,14,0.97)',
+    padding: 16,
+  },
+  trialTopLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 1.5 },
+  trialEyebrow: { fontFamily: Fonts.body, fontSize: 8, letterSpacing: 2, marginBottom: 6 },
+  trialPromptText: { fontFamily: Fonts.prose, fontSize: 13, color: Colors.textMuted, marginBottom: 12, lineHeight: 18 },
+  trialProgressTrack: { height: 9, borderRadius: 5, backgroundColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' },
+  trialProgressFill: { height: '100%', borderRadius: 5 },
+  trialProgressLabel: { fontFamily: Fonts.heading, fontSize: 11, color: Colors.textMuted, marginTop: 6, marginBottom: 12, letterSpacing: 0.5 },
+  trialClaimBtn: {
+    alignItems: 'center', borderWidth: 1.5, borderRadius: 12,
+    paddingVertical: 13, overflow: 'hidden',
+  },
+  trialClaimBtnText: { fontFamily: Fonts.heading, fontSize: 12, letterSpacing: 1.5 },
+  trialClaimedText: { fontFamily: Fonts.prose, fontSize: 11, color: Colors.textMuted, textAlign: 'center' },  vacationBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     marginHorizontal: Spacing.lg, marginBottom: 10,
     borderWidth: 1, borderColor: 'rgba(168,196,212,0.3)',
     borderRadius: 14, overflow: 'hidden', backgroundColor: 'rgba(14,11,20,0.95)',
     paddingHorizontal: Spacing.md, paddingVertical: 10,
+  },
+    trialCardClip: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 16.5, overflow: 'hidden' },
+  trialCardInnerEngrave: { position: 'absolute', top: 4, left: 4, right: 4, bottom: 4, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  trialCardWatermarkRune: { position: 'absolute', bottom: -24, right: -10, fontSize: 120, fontFamily: 'System', opacity: 0.04 },
+  trialCardSealWrap: { alignItems: 'center', marginBottom: 10 },
+  trialCardSeal: { width: 64, height: 64, borderRadius: 32, borderWidth: 1.5, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  trialCardSealRune: {
+    fontSize: 28, fontFamily: 'System', color: Colors.void,
+    textShadowColor: 'rgba(0,0,0,0.4)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 1,
+  },
+  trialCardTitle: {
+    fontFamily: Fonts.heading, fontSize: 18, color: Colors.text, textAlign: 'center',
+    letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 6,
+    textShadowColor: 'rgba(0,0,0,0.55)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 1,
   },
   vacationBannerIcon: { fontSize: 20, color: Colors.ice, fontFamily: 'System' },
   vacationBannerEyebrow: { fontFamily: Fonts.body, fontSize: 8, letterSpacing: 1.5, color: Colors.ice, marginBottom: 2 },
