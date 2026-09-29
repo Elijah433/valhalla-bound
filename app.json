@@ -2,7 +2,7 @@
   "expo": {
     "name": "Valhalla Bound",
     "slug": "valhalla-bound",
-    "version": "2.4.0",
+    "version": "2.5.0",
     "orientation": "portrait",
     "icon": "./assets/images/valhalla.png",
     "scheme": "valhallabound",
@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.elijah.valhallabound",
-      "buildNumber": "46",
+      "buildNumber": "47",
       "infoPlist": {
         "NSCameraUsageDescription": "Valhalla Bound uses your camera to scan food barcodes and take progress photos for the Mead Hall.",
         "NSPhotoLibraryUsageDescription": "Valhalla Bound accesses your photo library so you can add progress photos, stored only on your device.",

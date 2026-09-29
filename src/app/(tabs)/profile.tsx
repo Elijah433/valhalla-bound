@@ -751,7 +751,7 @@ export default function ProfileScreen() {
           {/* Footer */}
           <View style={styles.footer}>
             <Text style={styles.footerRunes}>{isShieldmaiden ? 'ᚠ  ᚢ  ᚱ  ᚨ  ᛁ' : 'ᚠ  ᚢ  ᚦ  ᚨ  ᚱ'}</Text>
-            <Text style={styles.footerVersion}>VALHALLA BOUND v2.4.0</Text>
+            <Text style={styles.footerVersion}>VALHALLA BOUND v2.5.0</Text>
             <Text style={styles.footerVerse}>
               {isShieldmaiden
                 ? '"She is clothed with strength and dignity." — Proverbs 31:25'
