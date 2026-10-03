@@ -169,7 +169,8 @@ export const useWarriorStore = create<WarriorStore>((set, get) => ({
       workoutCount,
       totalMiles,
       streakDays: warrior?.streak_days ?? 0,
-       isPro: warrior?.is_pro === 1,
+        isPro: warrior?.is_pro === 1,
+     
 
 
 

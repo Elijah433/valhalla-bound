@@ -8,28 +8,28 @@
 
 /* Begin PBXBuildFile section */
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
-		1F6A860B7C3FC7B744D80847 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28CF7A9D704B44E430EDAB50 /* ExpoModulesProvider.swift */; };
+		234EF5CB9CEEC6CBCDCAF5D4 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = CBF7D03477A74E0FD8365E78 /* PrivacyInfo.xcprivacy */; };
+		37926F7F37AE2A6C5471A5D1 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01EDEA54BE1F4612AEFF2D45 /* ExpoModulesProvider.swift */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
-		6B74DE82FDE95A0D8E99F530 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 450CFE20CE626F97529DF936 /* PrivacyInfo.xcprivacy */; };
-		AB7643AAAFC39A181C8CD598 /* libPods-ValhallaBound.a in Frameworks */ = {isa = PBXBuildFile; fileRef = AFA5830062C11B741199E81A /* libPods-ValhallaBound.a */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
+		D4BA9C9DAEBC0D90520C2904 /* libPods-ValhallaBound.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 423AF3FEEF73CD3E3F1FE11A /* libPods-ValhallaBound.a */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		01EDEA54BE1F4612AEFF2D45 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-ValhallaBound/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* ValhallaBound.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ValhallaBound.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = ValhallaBound/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = ValhallaBound/Info.plist; sourceTree = "<group>"; };
-		28CF7A9D704B44E430EDAB50 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-ValhallaBound/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
-		2A2E79E946D088C6854D48FA /* Pods-ValhallaBound.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ValhallaBound.debug.xcconfig"; path = "Target Support Files/Pods-ValhallaBound/Pods-ValhallaBound.debug.xcconfig"; sourceTree = "<group>"; };
-		38110B89E324B527A63CB7FE /* Pods-ValhallaBound.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ValhallaBound.release.xcconfig"; path = "Target Support Files/Pods-ValhallaBound/Pods-ValhallaBound.release.xcconfig"; sourceTree = "<group>"; };
-		450CFE20CE626F97529DF936 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = ValhallaBound/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		4208D91858DE48079670B03B /* Pods-ValhallaBound.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ValhallaBound.debug.xcconfig"; path = "Target Support Files/Pods-ValhallaBound/Pods-ValhallaBound.debug.xcconfig"; sourceTree = "<group>"; };
+		423AF3FEEF73CD3E3F1FE11A /* libPods-ValhallaBound.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-ValhallaBound.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = ValhallaBound/SplashScreen.storyboard; sourceTree = "<group>"; };
-		AFA5830062C11B741199E81A /* libPods-ValhallaBound.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-ValhallaBound.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
+		CBF7D03477A74E0FD8365E78 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = ValhallaBound/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = ValhallaBound/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* ValhallaBound-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "ValhallaBound-Bridging-Header.h"; path = "ValhallaBound/ValhallaBound-Bridging-Header.h"; sourceTree = "<group>"; };
+		F475A4F89475169DF8FA5C44 /* Pods-ValhallaBound.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ValhallaBound.release.xcconfig"; path = "Target Support Files/Pods-ValhallaBound/Pods-ValhallaBound.release.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -37,7 +37,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AB7643AAAFC39A181C8CD598 /* libPods-ValhallaBound.a in Frameworks */,
+				D4BA9C9DAEBC0D90520C2904 /* libPods-ValhallaBound.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -53,15 +53,7 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				450CFE20CE626F97529DF936 /* PrivacyInfo.xcprivacy */,
-			);
-			name = ValhallaBound;
-			sourceTree = "<group>";
-		};
-		25531734A868E466DBAD4E9A /* ValhallaBound */ = {
-			isa = PBXGroup;
-			children = (
-				28CF7A9D704B44E430EDAB50 /* ExpoModulesProvider.swift */,
+				CBF7D03477A74E0FD8365E78 /* PrivacyInfo.xcprivacy */,
 			);
 			name = ValhallaBound;
 			sourceTree = "<group>";
@@ -70,9 +62,35 @@
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				AFA5830062C11B741199E81A /* libPods-ValhallaBound.a */,
+				423AF3FEEF73CD3E3F1FE11A /* libPods-ValhallaBound.a */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		34CC8006E2C838403E176533 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				4208D91858DE48079670B03B /* Pods-ValhallaBound.debug.xcconfig */,
+				F475A4F89475169DF8FA5C44 /* Pods-ValhallaBound.release.xcconfig */,
+			);
+			name = Pods;
+			path = Pods;
+			sourceTree = "<group>";
+		};
+		4433EC7DE71DEA5D01D83F9E /* ExpoModulesProviders */ = {
+			isa = PBXGroup;
+			children = (
+				7CCE0E904A520196633C514D /* ValhallaBound */,
+			);
+			name = ExpoModulesProviders;
+			sourceTree = "<group>";
+		};
+		7CCE0E904A520196633C514D /* ValhallaBound */ = {
+			isa = PBXGroup;
+			children = (
+				01EDEA54BE1F4612AEFF2D45 /* ExpoModulesProvider.swift */,
+			);
+			name = ValhallaBound;
 			sourceTree = "<group>";
 		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
@@ -89,8 +107,8 @@
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
-				8E24ECB1506355C6C965E703 /* Pods */,
-				BFF772B61636B557CE64CCE6 /* ExpoModulesProviders */,
+				34CC8006E2C838403E176533 /* Pods */,
+				4433EC7DE71DEA5D01D83F9E /* ExpoModulesProviders */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -105,16 +123,6 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		8E24ECB1506355C6C965E703 /* Pods */ = {
-			isa = PBXGroup;
-			children = (
-				2A2E79E946D088C6854D48FA /* Pods-ValhallaBound.debug.xcconfig */,
-				38110B89E324B527A63CB7FE /* Pods-ValhallaBound.release.xcconfig */,
-			);
-			name = Pods;
-			path = Pods;
-			sourceTree = "<group>";
-		};
 		BB2F792B24A3F905000567C9 /* Supporting */ = {
 			isa = PBXGroup;
 			children = (
@@ -122,14 +130,6 @@
 			);
 			name = Supporting;
 			path = ValhallaBound/Supporting;
-			sourceTree = "<group>";
-		};
-		BFF772B61636B557CE64CCE6 /* ExpoModulesProviders */ = {
-			isa = PBXGroup;
-			children = (
-				25531734A868E466DBAD4E9A /* ValhallaBound */,
-			);
-			name = ExpoModulesProviders;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -140,13 +140,13 @@
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "ValhallaBound" */;
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
-				D81DE104DCFB1CDDD7BFBD6D /* [Expo] Configure project */,
+				ADB015CB74163E19E6D44729 /* [Expo] Configure project */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				5699588D65D09E10BA0E6EE1 /* [CP] Embed Pods Frameworks */,
+				5F51E3E903EF922685CBB210 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
@@ -196,7 +196,7 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				6B74DE82FDE95A0D8E99F530 /* PrivacyInfo.xcprivacy in Resources */,
+				234EF5CB9CEEC6CBCDCAF5D4 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -242,7 +242,7 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
-		5699588D65D09E10BA0E6EE1 /* [CP] Embed Pods Frameworks */ = {
+		5F51E3E903EF922685CBB210 /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -338,7 +338,7 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ValhallaBound/Pods-ValhallaBound-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		D81DE104DCFB1CDDD7BFBD6D /* [Expo] Configure project */ = {
+		ADB015CB74163E19E6D44729 /* [Expo] Configure project */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -370,7 +370,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
-				1F6A860B7C3FC7B744D80847 /* ExpoModulesProvider.swift in Sources */,
+				37926F7F37AE2A6C5471A5D1 /* ExpoModulesProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -379,7 +379,7 @@
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 2A2E79E946D088C6854D48FA /* Pods-ValhallaBound.debug.xcconfig */;
+			baseConfigurationReference = 4208D91858DE48079670B03B /* Pods-ValhallaBound.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
@@ -416,7 +416,7 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 38110B89E324B527A63CB7FE /* Pods-ValhallaBound.release.xcconfig */;
+			baseConfigurationReference = F475A4F89475169DF8FA5C44 /* Pods-ValhallaBound.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;

@@ -5,9 +5,20 @@ import {
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Reanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+  withDelay,
+  interpolate,
+  Easing,
+} from 'react-native-reanimated';
 import { useWarriorStore } from '@/lib/store';
 import { getRank, RANKS, getRankTitle, getRankDescription } from '@/constants/ranks';
 import { getRealm, NINE_REALMS } from '@/constants/realms';
@@ -217,6 +228,49 @@ function DailySagaCard({ accentColor }: { accentColor: string }) {
   );
 }
 
+// A single drifting ember — rises slowly from near the bottom of the hero
+// card, wobbling slightly side to side, fading in then out, then resets
+// and repeats on its own loop. Several of these with staggered delays and
+// durations give the embers an unsynced, natural feel instead of a single
+// obvious repeating animation.
+function FireEmber({ delay, duration, left, size, color }: {
+  delay: number; duration: number; left: `${number}%`; size: number; color: string;
+}) {
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    progress.value = withDelay(
+      delay,
+      withRepeat(
+        withSequence(
+          withTiming(1, { duration, easing: Easing.out(Easing.quad) }),
+          withTiming(0, { duration: 0 }),
+        ),
+        -1,
+        false,
+      ),
+    );
+  }, []);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    const translateY = interpolate(progress.value, [0, 1], [0, -100]);
+    const translateX = Math.sin(progress.value * Math.PI * 2) * 5;
+    const opacity = interpolate(progress.value, [0, 0.15, 0.7, 1], [0, 0.5, 0.3, 0]);
+    return { opacity, transform: [{ translateY }, { translateX }] };
+  });
+
+  return (
+    <Reanimated.View
+      pointerEvents="none"
+      style={[
+        styles.fireEmber,
+        { left, width: size, height: size, borderRadius: size / 2, backgroundColor: color },
+        animatedStyle,
+      ]}
+    />
+  );
+}
+
 export default function ProfileScreen() {
   const { warrior, isPro, setName, setPro, workoutCount } = useWarriorStore();
   const { isShieldmaiden } = useWarriorProfile();
@@ -279,6 +333,57 @@ export default function ProfileScreen() {
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }).start();
   }, []);
+
+  // Hero card micro-animations — a breathing glow on the rune medallion, a
+  // slow light sweep across the card's glass surface, and a brief tap
+  // bounce. All run on the UI thread via Reanimated so they stay smooth
+  // even while the rest of the screen is busy.
+  const iconGlowShadow = useSharedValue(0.4);
+  const iconScale = useSharedValue(1);
+  const rankUpFlash = useSharedValue(0);
+
+  useEffect(() => {
+    iconGlowShadow.value = withRepeat(
+      withSequence(
+        withTiming(0.7, { duration: 1800, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0.35, { duration: 1800, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      true,
+    );
+  }, []);
+
+  // If Valor has gone up since the last time this screen was opened, give
+  // the card a brief gold flash + success haptic — a small "you earned
+  // this" moment instead of the number just silently being higher.
+  useEffect(() => {
+    AsyncStorage.getItem('valhalla_last_seen_xp').then((stored) => {
+      const lastXp = stored ? parseInt(stored, 10) : null;
+      if (lastXp !== null && xp > lastXp) {
+        rankUpFlash.value = withSequence(
+          withTiming(0.35, { duration: 220 }),
+          withTiming(0, { duration: 900 }),
+        );
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+      AsyncStorage.setItem('valhalla_last_seen_xp', String(xp));
+    });
+  }, [xp]);
+
+  function onIconPressIn() {
+    iconScale.value = withTiming(0.92, { duration: 100 });
+  }
+  function onIconPressOut() {
+    iconScale.value = withTiming(1, { duration: 180 });
+  }
+
+  const iconGlowAnimatedStyle = useAnimatedStyle(() => ({
+    shadowOpacity: iconGlowShadow.value,
+    transform: [{ scale: iconScale.value }],
+  }));
+  const rankUpFlashStyle = useAnimatedStyle(() => ({
+    opacity: rankUpFlash.value,
+  }));
 
   function loadBodyStats() {
     const latest = getLatestWeight();
@@ -399,18 +504,47 @@ export default function ProfileScreen() {
           </View>
 
           {/* Hero card */}
-          <View style={[styles.heroCard, { borderColor: `${accentColor}25` }]}>
-            <LinearGradient colors={[`${accentColor}08`, 'transparent']} style={StyleSheet.absoluteFill} />
-            <LinearGradient colors={['transparent', accentColor, 'transparent']} style={styles.heroTopLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+          <View style={styles.heroCardOuterGlow}>
+          <View style={[styles.heroCard, { borderColor: `${accentColor}40` }]}>
+            <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
+            <LinearGradient colors={[`${accentColor}14`, 'transparent', `${accentColor}08`]} style={StyleSheet.absoluteFill} />
+            <Reanimated.View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.gold, borderRadius: 18 }, rankUpFlashStyle]} pointerEvents="none" />
 
-            <TouchableOpacity
-              style={[styles.heroIconWrap, { borderColor: `${accentColor}30` }]}
-              onPress={() => router.push('/(modals)/character-creator' as any)}
-              activeOpacity={0.85}
-            >
-              <LinearGradient colors={[`${accentColor}15`, `${accentColor}05`]} style={StyleSheet.absoluteFill} />
-              <Text style={[styles.heroIcon, { color: accentColor }]}>{selectedRune ?? rank.icon}</Text>
-            </TouchableOpacity>
+            {/* Drifting fire embers — subtle, staggered, never synced */}
+            <View style={styles.fireEmbersLayer} pointerEvents="none">
+              <FireEmber delay={0} duration={4600} left="10%" size={3} color="#FF9D4D" />
+              <FireEmber delay={1100} duration={5300} left="26%" size={2} color={Colors.gold} />
+              <FireEmber delay={2200} duration={4900} left="46%" size={3.5} color="#FF8142" />
+              <FireEmber delay={500} duration={5500} left="64%" size={2.5} color="#FFB347" />
+              <FireEmber delay={1700} duration={4700} left="80%" size={2.5} color="#FF9D4D" />
+              <FireEmber delay={2900} duration={5100} left="93%" size={2} color={Colors.gold} />
+            </View>
+
+            <LinearGradient colors={['transparent', accentColor, 'transparent']} style={styles.heroTopLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+            <LinearGradient colors={['rgba(255,255,255,0.12)', 'rgba(255,255,255,0)']} style={styles.heroGlassHighlight} pointerEvents="none" />
+            <View style={[styles.heroInsetBorder, { borderColor: `${accentColor}18` }]} pointerEvents="none" />
+
+            {/* HUD-style corner brackets */}
+            <View style={[styles.heroCornerTL, { borderColor: accentColor }]} pointerEvents="none" />
+            <View style={[styles.heroCornerTR, { borderColor: accentColor }]} pointerEvents="none" />
+            <View style={[styles.heroCornerBL, { borderColor: accentColor }]} pointerEvents="none" />
+            <View style={[styles.heroCornerBR, { borderColor: accentColor }]} pointerEvents="none" />
+
+            <Reanimated.View style={[styles.heroIconGlowWrap, { shadowColor: accentColor }, iconGlowAnimatedStyle]}>
+              <TouchableOpacity
+                style={[styles.heroIconWrap, { borderColor: `${accentColor}55` }]}
+                onPress={() => router.push('/(modals)/character-creator' as any)}
+                onPressIn={onIconPressIn}
+                onPressOut={onIconPressOut}
+                activeOpacity={0.85}
+              >
+                <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} />
+                <LinearGradient colors={[`${accentColor}22`, `${accentColor}08`]} style={StyleSheet.absoluteFill} />
+                <LinearGradient colors={['rgba(255,255,255,0.18)', 'rgba(255,255,255,0)']} style={styles.iconGlassShine} pointerEvents="none" />
+                <View style={[styles.iconInsetRing, { borderColor: `${accentColor}35` }]} pointerEvents="none" />
+                <Text style={[styles.heroIcon, { color: accentColor }]}>{selectedRune ?? rank.icon}</Text>
+              </TouchableOpacity>
+            </Reanimated.View>
 
             {editing ? (
               <View style={styles.nameEditRow}>
@@ -438,17 +572,19 @@ export default function ProfileScreen() {
                 style={styles.nameRow}
                 onPress={() => { setEditing(true); setNameInput(warrior?.name ?? ''); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
               >
-                <Text style={styles.heroName}>{warrior?.name ?? 'Warrior'}</Text>
+                <Text style={[styles.heroName, { textShadowColor: `${accentColor}80` }]}>{warrior?.name ?? 'Warrior'}</Text>
                 <Text style={styles.editIcon}>✎</Text>
               </TouchableOpacity>
             )}
 
             <View style={styles.badgeRow}>
-              <View style={[styles.rankBadge, { borderColor: `${accentColor}30`, backgroundColor: `${accentColor}10` }]}>
+              <View style={[styles.rankBadge, { borderColor: `${accentColor}45`, backgroundColor: `${accentColor}14` }]}>
+                <LinearGradient colors={[`${accentColor}20`, 'transparent']} style={StyleSheet.absoluteFill} />
                 <Text style={[styles.rankBadgeText, { color: accentColor }]}>{getRankTitle(rank, isShieldmaiden).toUpperCase()}</Text>
               </View>
               {isPro && (
                 <View style={styles.proBadge}>
+                  <LinearGradient colors={['rgba(201,168,76,0.22)', 'rgba(201,168,76,0.06)']} style={StyleSheet.absoluteFill} />
                   <Text style={styles.proBadgeText}>✦ PRO</Text>
                 </View>
               )}
@@ -458,6 +594,8 @@ export default function ProfileScreen() {
                 </View>
               )}
             </View>
+
+            <View style={[styles.heroDivider, { backgroundColor: `${accentColor}20` }]} />
 
             {allTimeWeightChange !== null && (
               <View style={styles.progressStatWrap}>
@@ -487,6 +625,7 @@ export default function ProfileScreen() {
                 {selectedRune ? 'ᛟ  Change Your Rune  →' : 'ᛟ  Choose Your Rune  →'}
               </Text>
             </TouchableOpacity>
+          </View>
           </View>
 
           {/* Rank path */}
@@ -751,7 +890,7 @@ export default function ProfileScreen() {
           {/* Footer */}
           <View style={styles.footer}>
             <Text style={styles.footerRunes}>{isShieldmaiden ? 'ᚠ  ᚢ  ᚱ  ᚨ  ᛁ' : 'ᚠ  ᚢ  ᚦ  ᚨ  ᚱ'}</Text>
-            <Text style={styles.footerVersion}>VALHALLA BOUND v2.5.0</Text>
+            <Text style={styles.footerVersion}>VALHALLA BOUND v2.6.0</Text>
             <Text style={styles.footerVerse}>
               {isShieldmaiden
                 ? '"She is clothed with strength and dignity." — Proverbs 31:25'
@@ -782,35 +921,70 @@ const styles = StyleSheet.create({
   eyebrow: { fontFamily: Fonts.body, fontSize: 9, letterSpacing: 4, color: Colors.textMuted, marginBottom: 2 },
   title: { fontFamily: Fonts.heading, fontSize: 34, color: Colors.text, letterSpacing: 1 },
 
-  heroCard: {
+  heroCardOuterGlow: {
     marginHorizontal: Spacing.lg, marginBottom: Spacing.lg,
+    borderRadius: 18,
+    shadowColor: Colors.gold, shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18, shadowRadius: 24, elevation: 10,
+  },
+  heroCard: {
     borderWidth: 1, borderRadius: 18, padding: Spacing.lg,
     alignItems: 'center', gap: 10, overflow: 'hidden',
-    backgroundColor: 'rgba(12,10,16,0.9)',
-    shadowColor: Colors.gold, shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.07, shadowRadius: 16,
+    backgroundColor: 'rgba(12,10,16,0.55)',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3, shadowRadius: 6, elevation: 6,
   },
   heroTopLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 1 },
+  heroGlassHighlight: {
+    position: 'absolute', top: 0, left: 0, right: 0, height: 70,
+    borderTopLeftRadius: 18, borderTopRightRadius: 18,
+  },
+  heroInsetBorder: {
+    position: 'absolute', top: 3, left: 3, right: 3, bottom: 3,
+    borderWidth: 1, borderRadius: 15,
+  },
+  fireEmbersLayer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  fireEmber: { position: 'absolute', bottom: 6 },
+  heroCornerTL: { position: 'absolute', top: 10, left: 10, width: 16, height: 16, borderTopWidth: 1.5, borderLeftWidth: 1.5, opacity: 0.7 },
+  heroCornerTR: { position: 'absolute', top: 10, right: 10, width: 16, height: 16, borderTopWidth: 1.5, borderRightWidth: 1.5, opacity: 0.7 },
+  heroCornerBL: { position: 'absolute', bottom: 10, left: 10, width: 16, height: 16, borderBottomWidth: 1.5, borderLeftWidth: 1.5, opacity: 0.7 },
+  heroCornerBR: { position: 'absolute', bottom: 10, right: 10, width: 16, height: 16, borderBottomWidth: 1.5, borderRightWidth: 1.5, opacity: 0.7 },
+  heroIconGlowWrap: {
+    borderRadius: 20, marginBottom: 4,
+    shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.55, shadowRadius: 14, elevation: 9,
+  },
   heroIconWrap: {
     width: 80, height: 80, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, overflow: 'hidden', marginBottom: 4,
+    borderWidth: 1, overflow: 'hidden',
+  },
+  iconGlassShine: {
+    position: 'absolute', top: 0, left: 0, right: 0, height: 30,
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+  },
+  iconInsetRing: {
+    position: 'absolute', top: 3, left: 3, right: 3, bottom: 3,
+    borderWidth: 1, borderRadius: 17,
   },
   heroIcon: { fontSize: 42, fontFamily: 'System' },
   buildAvatarBtn: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 8, overflow: 'hidden', marginTop: 4 },
   buildAvatarText: { fontFamily: Fonts.body, fontSize: 10, letterSpacing: 2 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  heroName: { fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, letterSpacing: 1 },
+  heroName: {
+    fontFamily: Fonts.heading, fontSize: 26, color: Colors.text, letterSpacing: 1,
+    textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 10,
+  },
   editIcon: { fontSize: 16, color: Colors.textMuted, opacity: 0.4 },
   nameEditRow: { flexDirection: 'row', alignItems: 'center', gap: 10, width: '100%' },
   nameInput: { flex: 1, fontFamily: Fonts.heading, fontSize: 20, color: Colors.text, borderBottomWidth: 1, borderBottomColor: Colors.goldBorder, paddingVertical: 6, letterSpacing: 1 },
   saveBtn: { borderRadius: Radii.sm, overflow: 'hidden', paddingHorizontal: 14, paddingVertical: 8 },
   saveBtnText: { fontFamily: Fonts.body, fontSize: 10, color: Colors.void, letterSpacing: 2 },
   badgeRow: { flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' },
-  rankBadge: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 3 },
+  rankBadge: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 3, overflow: 'hidden' },
   rankBadgeText: { fontFamily: Fonts.body, fontSize: 9, letterSpacing: 1.5 },
-  proBadge: { backgroundColor: 'rgba(201,168,76,0.1)', borderWidth: 1, borderColor: Colors.goldBorder, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 3 },
+  proBadge: { backgroundColor: 'rgba(201,168,76,0.1)', borderWidth: 1, borderColor: Colors.goldBorder, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 3, overflow: 'hidden' },
   proBadgeText: { fontFamily: Fonts.body, fontSize: 9, color: Colors.gold, letterSpacing: 1.5 },
+  heroDivider: { height: 1, width: '60%', marginVertical: 2 },
   valkBadge: { backgroundColor: 'rgba(212,168,196,0.1)', borderWidth: 1, borderColor: 'rgba(212,168,196,0.3)', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 3 },
   valkBadgeText: { fontFamily: Fonts.body, fontSize: 9, color: '#D4A8C4', letterSpacing: 1.5 },
   progressStatWrap: { alignItems: 'center', gap: 2, marginVertical: 2 },

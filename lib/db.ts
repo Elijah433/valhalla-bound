@@ -103,6 +103,7 @@ export async function initDb() {
       protein INTEGER NOT NULL DEFAULT 180,
       carbs INTEGER NOT NULL DEFAULT 250,
       fat INTEGER NOT NULL DEFAULT 80,
+      fiber INTEGER NOT NULL DEFAULT 30,
       water_goal_oz INTEGER NOT NULL DEFAULT 128
     );
 
@@ -114,6 +115,7 @@ export async function initDb() {
       protein REAL NOT NULL DEFAULT 0,
       carbs REAL NOT NULL DEFAULT 0,
       fat REAL NOT NULL DEFAULT 0,
+      fiber REAL NOT NULL DEFAULT 0,
       serving_size TEXT NOT NULL DEFAULT '1 serving',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -184,6 +186,20 @@ export async function initDb() {
   // as the migration above.
   try {
     db.execSync(`ALTER TABLE macro_goals ADD COLUMN water_goal_oz INTEGER NOT NULL DEFAULT 128;`);
+  } catch (e) {
+    // Column already exists — expected on every launch after the first.
+  }
+
+  // Migration: macro_goals and meal_logs both gained a `fiber` column —
+  // same defensive pattern as the migration above.
+  try {
+    db.execSync(`ALTER TABLE macro_goals ADD COLUMN fiber INTEGER NOT NULL DEFAULT 30;`);
+  } catch (e) {
+    // Column already exists — expected on every launch after the first.
+  }
+
+  try {
+    db.execSync(`ALTER TABLE meal_logs ADD COLUMN fiber REAL NOT NULL DEFAULT 0;`);
   } catch (e) {
     // Column already exists — expected on every launch after the first.
   }
@@ -641,6 +657,7 @@ export interface MacroGoals {
   protein: number;
   carbs: number;
   fat: number;
+  fiber: number;
   water_goal_oz: number;
 }
 
@@ -652,6 +669,7 @@ export interface MealLog {
   protein: number;
   carbs: number;
   fat: number;
+  fiber: number;
   serving_size: string;
   created_at: string;
 }
@@ -661,27 +679,30 @@ export interface DayMacros {
   protein: number;
   carbs: number;
   fat: number;
+  fiber: number;
 }
 
 export function getMacroGoals(): MacroGoals {
   const db = getDb();
   return db.getFirstSync<MacroGoals>('SELECT * FROM macro_goals WHERE id = 1') ?? {
-    id: 1, calories: 2500, protein: 180, carbs: 250, fat: 80, water_goal_oz: 128,
+    id: 1, calories: 2500, protein: 180, carbs: 250, fat: 80, fiber: 30, water_goal_oz: 128,
   };
 }
 
-export function updateMacroGoals(calories: number, protein: number, carbs: number, fat: number, waterGoalOz?: number) {
+export function updateMacroGoals(calories: number, protein: number, carbs: number, fat: number, waterGoalOz?: number, fiber?: number) {
   const db = getDb();
-  // If no water goal is passed (e.g. an older call site that doesn't know
-  // about it yet), preserve whatever is already stored rather than
-  // silently resetting it to a hardcoded default — a person's custom
-  // water goal shouldn't get wiped out just because they updated their
+  // If no water goal or fiber goal is passed (e.g. an older call site that
+  // doesn't know about them yet), preserve whatever is already stored
+  // rather than silently resetting it to a hardcoded default — a person's
+  // custom goals shouldn't get wiped out just because they updated their
   // calorie/macro targets from a screen that hasn't been updated to pass
-  // the water value too.
-  const resolvedWater = waterGoalOz ?? getMacroGoals().water_goal_oz;
+  // every field too.
+  const current = getMacroGoals();
+  const resolvedWater = waterGoalOz ?? current.water_goal_oz;
+  const resolvedFiber = fiber ?? current.fiber;
   db.runSync(
-    'UPDATE macro_goals SET calories = ?, protein = ?, carbs = ?, fat = ?, water_goal_oz = ? WHERE id = 1',
-    [calories, protein, carbs, fat, resolvedWater]
+    'UPDATE macro_goals SET calories = ?, protein = ?, carbs = ?, fat = ?, water_goal_oz = ?, fiber = ? WHERE id = 1',
+    [calories, protein, carbs, fat, resolvedWater, resolvedFiber]
   );
 }
 
@@ -692,13 +713,14 @@ export function logMeal(
   protein: number,
   carbs: number,
   fat: number,
-  servingSize: string
+  servingSize: string,
+  fiber: number = 0
 ): number {
   const db = getDb();
   const result = db.runSync(
-    `INSERT INTO meal_logs (meal_type, food_name, calories, protein, carbs, fat, serving_size)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [mealType, foodName, calories, protein, carbs, fat, servingSize]
+    `INSERT INTO meal_logs (meal_type, food_name, calories, protein, carbs, fat, serving_size, fiber)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [mealType, foodName, calories, protein, carbs, fat, servingSize, fiber]
   );
   return result.lastInsertRowId;
 }
@@ -723,8 +745,9 @@ export function getTodayMacros(): DayMacros {
       protein: totals.protein + m.protein,
       carbs: totals.carbs + m.carbs,
       fat: totals.fat + m.fat,
+      fiber: totals.fiber + (m.fiber ?? 0),
     }),
-    { calories: 0, protein: 0, carbs: 0, fat: 0 }
+    { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 }
   );
 }
 
@@ -742,12 +765,13 @@ export function updateMealLog(
   calories: number,
   protein: number,
   carbs: number,
-  fat: number
+  fat: number,
+  fiber: number = 0
 ) {
   const db = getDb();
   db.runSync(
-    `UPDATE meal_logs SET food_name = ?, calories = ?, protein = ?, carbs = ?, fat = ? WHERE id = ?`,
-    [foodName, calories, protein, carbs, fat, id]
+    `UPDATE meal_logs SET food_name = ?, calories = ?, protein = ?, carbs = ?, fat = ?, fiber = ? WHERE id = ?`,
+    [foodName, calories, protein, carbs, fat, fiber, id]
   );
 }
 export function getMealsForDateRange(daysBack: number): { date: string; macros: DayMacros }[] {
@@ -760,11 +784,12 @@ export function getMealsForDateRange(daysBack: number): { date: string; macros: 
   const byDate: Record<string, DayMacros> = {};
   all.forEach(m => {
     const date = utcTimestampToLocalDateString(m.created_at);
-    if (!byDate[date]) byDate[date] = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+    if (!byDate[date]) byDate[date] = { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 };
     byDate[date].calories += m.calories;
     byDate[date].protein += m.protein;
     byDate[date].carbs += m.carbs;
     byDate[date].fat += m.fat;
+    byDate[date].fiber += (m.fiber ?? 0);
   });
 
   // Build an entry for every day in range, including days with no data.
@@ -773,7 +798,7 @@ export function getMealsForDateRange(daysBack: number): { date: string; macros: 
     const d = new Date();
     d.setDate(d.getDate() - i);
     const dateStr = getLocalDateString(d);
-    result.push({ date: dateStr, macros: byDate[dateStr] ?? { calories: 0, protein: 0, carbs: 0, fat: 0 } });
+    result.push({ date: dateStr, macros: byDate[dateStr] ?? { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 } });
   }
   return result;
 }

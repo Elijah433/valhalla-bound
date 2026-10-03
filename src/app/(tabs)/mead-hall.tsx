@@ -106,17 +106,21 @@ const MACROS = [
   { key: 'protein', label: 'Protein', sub: 'Meat', color: Colors.gold, rune: 'ᚦ', unit: 'g' },
   { key: 'carbs', label: 'Carbs', sub: 'Grain', color: Colors.ice, rune: 'ᚨ', unit: 'g' },
   { key: 'fat', label: 'Fat', sub: 'Fuel', color: '#8B6FD4', rune: 'ᚱ', unit: 'g' },
+  { key: 'fiber', label: 'Fiber', sub: 'Roots', color: '#4CAF50', rune: 'ᛈ', unit: 'g' },
 ];
 
-function MacroRing({ value, goal, color, label, sub, rune, unit, delay }: {
+function MacroRing({ value, goal, color, label, sub, rune, unit, delay, size = 86 }: {
   value: number; goal: number; color: string; label: string;
-  sub: string; rune: string; unit: string; delay: number;
+  sub: string; rune: string; unit: string; delay: number; size?: number;
 }) {
   const anim = useRef(new Animated.Value(0)).current;
   const progress = Math.min(value / Math.max(goal, 1), 1);
   const isOver = value > goal;
-  const size = 86;
-  const stroke = 6;
+  // Ring thickness and all inner text scale together off the base 86px
+  // design so a smaller ring (e.g. fitting 4 across instead of 3) stays
+  // proportional instead of the stroke/text looking oversized for the circle.
+  const stroke = Math.max(4, Math.round(size / 14.3));
+  const scale = size / 86;
 
   useEffect(() => {
     Animated.timing(anim, { toValue: progress, duration: 1100, delay, useNativeDriver: false }).start();
@@ -143,16 +147,16 @@ function MacroRing({ value, goal, color, label, sub, rune, unit, delay }: {
           shadowRadius: 5,
         }} />
         <View style={{ alignItems: 'center', gap: 1 }}>
-          <Text style={{ fontSize: 11, color, fontFamily: 'System' }}>{rune}</Text>
-          <Text style={{ fontFamily: Fonts.heading, fontSize: 17, color: isOver ? Colors.blood : Colors.text, lineHeight: 19 }}>
+          <Text style={{ fontSize: 11 * scale, color, fontFamily: 'System' }}>{rune}</Text>
+          <Text style={{ fontFamily: Fonts.heading, fontSize: 17 * scale, color: isOver ? Colors.blood : Colors.text, lineHeight: 19 * scale }}>
             {Math.round(value)}
           </Text>
-          <Text style={{ fontFamily: Fonts.body, fontSize: 7, letterSpacing: 1, color }}>{unit}</Text>
+          <Text style={{ fontFamily: Fonts.body, fontSize: 7 * scale, letterSpacing: 1, color }}>{unit}</Text>
         </View>
       </View>
-      <Text style={{ fontFamily: Fonts.subheading, fontSize: 12, color }}>{label}</Text>
-      <Text style={{ fontFamily: Fonts.body, fontSize: 7, letterSpacing: 1.5, color: Colors.textMuted }}>{sub}</Text>
-      <Text style={{ fontFamily: Fonts.prose, fontSize: 10, color: isOver ? Colors.blood : Colors.textDim }}>
+      <Text style={{ fontFamily: Fonts.subheading, fontSize: 12 * scale, color }}>{label}</Text>
+      <Text style={{ fontFamily: Fonts.body, fontSize: 7 * scale, letterSpacing: 1.5, color: Colors.textMuted }}>{sub}</Text>
+      <Text style={{ fontFamily: Fonts.prose, fontSize: 10 * scale, color: isOver ? Colors.blood : Colors.textDim }}>
         {isOver ? `+${Math.round(value - goal)} over` : `${Math.round(goal - value)} left`}
       </Text>
     </View>
@@ -413,8 +417,8 @@ function SleepTrendGraph({ data, compact = false }: { data: SleepPoint[]; compac
 export default function MeadHallScreen() {
   const { isPro } = useWarriorStore();
 
-  const [macros, setMacros] = useState({ calories: 0, protein: 0, carbs: 0, fat: 0 });
-  const [goals, setGoals] = useState({ calories: 2500, protein: 180, carbs: 250, fat: 80, water_goal_oz: 128 });
+  const [macros, setMacros] = useState({ calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 });
+  const [goals, setGoals] = useState({ calories: 2500, protein: 180, carbs: 250, fat: 80, fiber: 30, water_goal_oz: 128 });
   const [meals, setMeals] = useState<MealLog[]>([]);
   const [weeklyData, setWeeklyData] = useState<{ date: string; macros: { calories: number; protein: number; carbs: number; fat: number } }[]>([]);
   const [waterGlasses, setWaterGlasses] = useState(0);
@@ -446,6 +450,7 @@ export default function MeadHallScreen() {
   const [editProtein, setEditProtein] = useState('');
   const [editCarbs, setEditCarbs] = useState('');
   const [editFat, setEditFat] = useState('');
+  const [editFiber, setEditFiber] = useState('');
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -516,6 +521,7 @@ export default function MeadHallScreen() {
     setEditProtein(String(meal.protein));
     setEditCarbs(String(meal.carbs));
     setEditFat(String(meal.fat));
+    setEditFiber(String(meal.fiber ?? 0));
   }
 
   function saveEditMeal() {
@@ -524,11 +530,12 @@ export default function MeadHallScreen() {
     const pro = parseFloat(editProtein) || 0;
     const carb = parseFloat(editCarbs) || 0;
     const fat = parseFloat(editFat) || 0;
+    const fib = parseFloat(editFiber) || 0;
     if (!editFoodName.trim()) {
       Alert.alert('Name required', 'Enter a name for this food.');
       return;
     }
-    updateMealLog(editingMeal.id, editFoodName.trim(), cal, pro, carb, fat);
+    updateMealLog(editingMeal.id, editFoodName.trim(), cal, pro, carb, fat, fib);
     setEditingMeal(null);
     Keyboard.dismiss();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -773,6 +780,7 @@ export default function MeadHallScreen() {
                 rune={m.rune}
                 unit={m.unit}
                 delay={150 + i * 80}
+                size={74}
               />
             ))}
           </View>
@@ -825,6 +833,41 @@ export default function MeadHallScreen() {
               )}
             </View>
           </View>
+
+          {/* What Should I Eat? — the v2.6.0 recommendation entry point.
+              Placed right after today's numbers so tapping it reads as
+              the natural next step: "here's where you're at, here's what
+              closes the gap." Pro-gated the same way Recipe Ideas/Fasting
+              are, and shows live remaining calories in the subtitle so it
+              never feels like a static button. */}
+          <TouchableOpacity
+            style={styles.feastCard}
+            onPress={() => {
+              if (!isPro) { router.push('/(modals)/paywall'); return; }
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              router.push('/(modals)/feast-recommendation' as any);
+            }}
+            activeOpacity={0.88}
+          >
+            <LinearGradient colors={['rgba(201,168,76,0.1)', 'transparent']} style={StyleSheet.absoluteFill} />
+            <LinearGradient colors={['transparent', Colors.gold, 'transparent']} style={styles.feastTopLine} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
+            <View style={styles.feastIconWrap}>
+              <Text style={styles.feastIcon}>ᚷ</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.feastEyebrow}>HUNGRY, WARRIOR?</Text>
+              <Text style={styles.feastTitle}>What Should I Eat?</Text>
+              <Text style={styles.feastSub}>
+                {Math.max(Math.round(goals.calories - macros.calories), 0)} cal left · get a suggestion
+              </Text>
+            </View>
+            {!isPro && (
+              <View style={styles.featureProBadge}>
+                <Text style={styles.featureProBadgeText}>PRO</Text>
+              </View>
+            )}
+            <Text style={styles.feastArrow}>→</Text>
+          </TouchableOpacity>
 
           {/* Recipe Ideas — links out to a dedicated screen with real
               recipe search (Spoonacular), filterable by diet/macros.
@@ -1239,6 +1282,13 @@ export default function MeadHallScreen() {
                   <TextInput style={styles.editFieldInput} value={editFat} onChangeText={setEditFat} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={Colors.textDim} />
                 </View>
               </View>
+              <View style={styles.editFieldRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.editFieldLabel}>FIBER (g)</Text>
+                  <TextInput style={styles.editFieldInput} value={editFiber} onChangeText={setEditFiber} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={Colors.textDim} />
+                </View>
+                <View style={{ flex: 1 }} />
+              </View>
               <TouchableOpacity style={styles.editSaveBtn} onPress={saveEditMeal}>
                 <Text style={styles.editSaveBtnText}>SAVE CHANGES</Text>
               </TouchableOpacity>
@@ -1462,6 +1512,27 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.proseItalic, fontSize: 11, color: Colors.textDim,
     fontStyle: 'italic', maxWidth: 160,
   },
+
+  feastCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginHorizontal: Spacing.lg, marginBottom: Spacing.lg,
+    borderWidth: 1, borderColor: Colors.goldBorder, borderRadius: 16,
+    overflow: 'hidden', backgroundColor: 'rgba(12,10,16,0.9)',
+    paddingHorizontal: Spacing.lg, paddingVertical: 16,
+    shadowColor: Colors.gold, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 14,
+  },
+  feastTopLine: { position: 'absolute', top: 0, left: 0, right: 0, height: 1 },
+  feastIconWrap: {
+    width: 44, height: 44, borderRadius: 12,
+    borderWidth: 1, borderColor: Colors.goldBorder,
+    backgroundColor: Colors.goldMuted,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  feastIcon: { fontSize: 20, color: Colors.gold, fontFamily: 'System' },
+  feastEyebrow: { fontFamily: Fonts.body, fontSize: 8, letterSpacing: 2, color: Colors.textMuted, marginBottom: 2 },
+  feastTitle: { fontFamily: Fonts.heading, fontSize: 16, color: Colors.gold, letterSpacing: 0.5, marginBottom: 2 },
+  feastSub: { fontFamily: Fonts.prose, fontSize: 11, color: Colors.textMuted },
+  feastArrow: { fontFamily: Fonts.heading, fontSize: 18, color: Colors.gold, opacity: 0.7 },
 
   recipeIdeasCard: {
     flexDirection: 'row', alignItems: 'center', gap: 12,

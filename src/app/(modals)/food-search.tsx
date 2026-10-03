@@ -21,23 +21,24 @@ interface FoodItem {
   protein: number;
   carbs: number;
   fat: number;
+  fiber: number;
   servingSize: string;
   brand?: string;
 }
 
 const QUICK_FOODS: FoodItem[] = [
-  { id: 'q1', name: 'Chicken Breast', calories: 165, protein: 31, carbs: 0, fat: 3.6, servingSize: '100g' },
-  { id: 'q2', name: 'White Rice (cooked)', calories: 130, protein: 2.7, carbs: 28, fat: 0.3, servingSize: '100g' },
-  { id: 'q3', name: 'Eggs (large)', calories: 78, protein: 6, carbs: 0.6, fat: 5, servingSize: '1 egg' },
-  { id: 'q4', name: 'Oats (dry)', calories: 389, protein: 17, carbs: 66, fat: 7, servingSize: '100g' },
-  { id: 'q5', name: 'Ground Beef 80/20', calories: 215, protein: 26, carbs: 0, fat: 13, servingSize: '100g' },
-  { id: 'q6', name: 'Sweet Potato', calories: 86, protein: 1.6, carbs: 20, fat: 0.1, servingSize: '100g' },
-  { id: 'q7', name: 'Greek Yogurt', calories: 59, protein: 10, carbs: 3.6, fat: 0.4, servingSize: '100g' },
-  { id: 'q8', name: 'Salmon', calories: 208, protein: 20, carbs: 0, fat: 13, servingSize: '100g' },
-  { id: 'q9', name: 'Banana', calories: 89, protein: 1.1, carbs: 23, fat: 0.3, servingSize: '1 medium' },
-  { id: 'q10', name: 'Whey Protein Shake', calories: 120, protein: 25, carbs: 3, fat: 1.5, servingSize: '1 scoop' },
-  { id: 'q11', name: 'Almonds', calories: 579, protein: 21, carbs: 22, fat: 50, servingSize: '100g' },
-  { id: 'q12', name: 'Broccoli', calories: 34, protein: 2.8, carbs: 7, fat: 0.4, servingSize: '100g' },
+  { id: 'q1', name: 'Chicken Breast', calories: 165, protein: 31, carbs: 0, fat: 3.6, fiber: 0, servingSize: '100g' },
+  { id: 'q2', name: 'White Rice (cooked)', calories: 130, protein: 2.7, carbs: 28, fat: 0.3, fiber: 0.4, servingSize: '100g' },
+  { id: 'q3', name: 'Eggs (large)', calories: 78, protein: 6, carbs: 0.6, fat: 5, fiber: 0, servingSize: '1 egg' },
+  { id: 'q4', name: 'Oats (dry)', calories: 389, protein: 17, carbs: 66, fat: 7, fiber: 10.6, servingSize: '100g' },
+  { id: 'q5', name: 'Ground Beef 80/20', calories: 215, protein: 26, carbs: 0, fat: 13, fiber: 0, servingSize: '100g' },
+  { id: 'q6', name: 'Sweet Potato', calories: 86, protein: 1.6, carbs: 20, fat: 0.1, fiber: 3, servingSize: '100g' },
+  { id: 'q7', name: 'Greek Yogurt', calories: 59, protein: 10, carbs: 3.6, fat: 0.4, fiber: 0, servingSize: '100g' },
+  { id: 'q8', name: 'Salmon', calories: 208, protein: 20, carbs: 0, fat: 13, fiber: 0, servingSize: '100g' },
+  { id: 'q9', name: 'Banana', calories: 89, protein: 1.1, carbs: 23, fat: 0.3, fiber: 2.6, servingSize: '1 medium' },
+  { id: 'q10', name: 'Whey Protein Shake', calories: 120, protein: 25, carbs: 3, fat: 1.5, fiber: 1, servingSize: '1 scoop' },
+  { id: 'q11', name: 'Almonds', calories: 579, protein: 21, carbs: 22, fat: 50, fiber: 12.5, servingSize: '100g' },
+  { id: 'q12', name: 'Broccoli', calories: 34, protein: 2.8, carbs: 7, fat: 0.4, fiber: 2.6, servingSize: '100g' },
 ];
 
 type Tab = 'search' | 'favorites' | 'custom';
@@ -60,6 +61,7 @@ export default function FoodSearchModal() {
   const [customProtein, setCustomProtein] = useState('');
   const [customCarbs, setCustomCarbs] = useState('');
   const [customFat, setCustomFat] = useState('');
+  const [customFiber, setCustomFiber] = useState('');
   const [customServing, setCustomServing] = useState('1 serving');
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -152,6 +154,9 @@ export default function FoodSearchModal() {
               protein: Math.round(getNutrient(1003) * 10) / 10,
               carbs: Math.round(getNutrient(1005) * 10) / 10,
               fat: Math.round(getNutrient(1004) * 10) / 10,
+              // Fiber, total dietary — nutrientId 1079. Same USDA response,
+              // just wasn't being pulled out before.
+              fiber: Math.round(getNutrient(1079) * 10) / 10,
               servingSize: f.servingSize
                 ? `${f.servingSize}${f.servingSizeUnit ?? 'g'}`
                 : '100g',
@@ -186,6 +191,7 @@ export default function FoodSearchModal() {
           protein: Math.round((p.nutriments['proteins_100g'] ?? 0) * 10) / 10,
           carbs: Math.round((p.nutriments['carbohydrates_100g'] ?? 0) * 10) / 10,
           fat: Math.round((p.nutriments['fat_100g'] ?? 0) * 10) / 10,
+          fiber: Math.round((p.nutriments['fiber_100g'] ?? 0) * 10) / 10,
           servingSize: p.serving_size?.trim() ?? '100g',
         }))
         .filter((f: FoodItem) => f.calories > 0);
@@ -214,7 +220,8 @@ export default function FoodSearchModal() {
       Math.round(selected.protein * multiplier * 10) / 10,
       Math.round(selected.carbs * multiplier * 10) / 10,
       Math.round(selected.fat * multiplier * 10) / 10,
-      `${servings}x ${selected.servingSize}`
+      `${servings}x ${selected.servingSize}`,
+      Math.round((selected.fiber ?? 0) * multiplier * 10) / 10
     );
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     router.back();
@@ -229,8 +236,9 @@ export default function FoodSearchModal() {
     const protein = parseFloat(customProtein) || 0;
     const carbs = parseFloat(customCarbs) || 0;
     const fat = parseFloat(customFat) || 0;
+    const fiber = parseFloat(customFiber) || 0;
 
-    logMeal(mealType, customName.trim(), Math.round(cals), protein, carbs, fat, customServing);
+    logMeal(mealType, customName.trim(), Math.round(cals), protein, carbs, fat, customServing, fiber);
 
     const customFood: FoodItem = {
       id: `custom_${Date.now()}`,
@@ -239,6 +247,7 @@ export default function FoodSearchModal() {
       protein,
       carbs,
       fat,
+      fiber,
       servingSize: customServing,
     };
     toggleFavorite(customFood);
@@ -406,14 +415,21 @@ export default function FoodSearchModal() {
                     <CustomField label="FAT (g)" value={customFat} onChange={setCustomFat} placeholder="0" numeric />
                   </View>
                 </View>
+                <View style={styles.customMacroRow}>
+                  <View style={{ flex: 1 }}>
+                    <CustomField label="FIBER (g)" value={customFiber} onChange={setCustomFiber} placeholder="0" numeric />
+                  </View>
+                  <View style={{ flex: 1 }} />
+                </View>
 
-                {(customCals || customProtein || customCarbs || customFat) ? (
+                {(customCals || customProtein || customCarbs || customFat || customFiber) ? (
                   <View style={styles.macroRow}>
                     {[
                       { label: 'KCAL', value: customCals || '0', color: '#E05020' },
                       { label: 'PROTEIN', value: customProtein || '0', color: Colors.gold },
                       { label: 'CARBS', value: customCarbs || '0', color: Colors.ice },
                       { label: 'FAT', value: customFat || '0', color: '#8B6FD4' },
+                      { label: 'FIBER', value: customFiber || '0', color: '#4CAF50' },
                     ].map((m) => (
                       <View key={m.label} style={styles.macroItem}>
                         <Text style={[styles.macroVal, { color: m.color }]}>{m.value}</Text>
@@ -498,6 +514,7 @@ function SelectedCard({
           { label: 'PROTEIN', value: Math.round(selected.protein * multiplier), color: Colors.gold },
           { label: 'CARBS', value: Math.round(selected.carbs * multiplier), color: Colors.ice },
           { label: 'FAT', value: Math.round(selected.fat * multiplier), color: '#8B6FD4' },
+          { label: 'FIBER', value: Math.round((selected.fiber ?? 0) * multiplier), color: '#4CAF50' },
         ].map((m) => (
           <View key={m.label} style={styles.macroItem}>
             <Text style={[styles.macroVal, { color: m.color }]}>{m.value}</Text>
@@ -540,7 +557,7 @@ function FoodRow({
         <Text style={styles.foodName} numberOfLines={1}>{food.name}</Text>
         {food.brand && <Text style={styles.foodBrand} numberOfLines={1}>{food.brand}</Text>}
         <Text style={styles.foodMacros}>
-          {food.calories} kcal · {food.protein}P · {food.carbs}C · {food.fat}F · {food.servingSize}
+          {food.calories} kcal · {food.protein}P · {food.carbs}C · {food.fat}F · {food.fiber ?? 0}Fib · {food.servingSize}
         </Text>
       </View>
       <TouchableOpacity onPress={onToggleFav} style={styles.favBtnSmall} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>

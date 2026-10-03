@@ -15,8 +15,8 @@ import { PROGRAMS, TYPE_COLORS } from '@/constants/programs';
 import { StreakFlame } from '../../components/StreakFlame';
 import { Colors, Fonts, Spacing, Radii } from '@/constants/theme';
 import { useWarriorProfile } from '@/lib/useWarriorProfile';
-import { getRecentSagaEntries, cleanSagaText, type SagaEntry, logRavenCheckin, getTodayRavenCheckin, getRecentRavenCheckins, type RavenCheckin, addXP } from '@/lib/db';
-import { getTrialProgress, isTrialClaimedThisWeek, claimTrialReward, getSeasonalTheme, WEEKLY_TRIAL_REWARD_XP, recordLegend, getLegends, formatTrialResult, type TrialProgress, type LegendEntry } from '@/lib/weeklyTrial';
+import { getRecentSagaEntries, cleanSagaText, type SagaEntry, logRavenCheckin, getTodayRavenCheckin, getRecentRavenCheckins, type RavenCheckin, addXP, getWeeklyTrialStats } from '@/lib/db';
+import { getTrialProgress, isTrialClaimedThisWeek, claimTrialReward, getSeasonalTheme, WEEKLY_TRIAL_REWARD_XP, recordLegend, getLegends, getWeekIndex, formatTrialResult, type TrialProgress, type LegendEntry } from '@/lib/weeklyTrial';
 import {
   TRIP_PROFILES, getTripProfile, startVacation, endVacation, getActiveVacation,
   getVacationMission, getReturnMission, getVacationCount, getLastTripType,
@@ -263,6 +263,9 @@ export default function HomeScreen() {
   const [trialProgress, setTrialProgress] = useState<TrialProgress | null>(null);
   const [trialClaimed, setTrialClaimed] = useState(false);
   const [trialPanelOpen, setTrialPanelOpen] = useState(false);
+  const [legends, setLegends] = useState<LegendEntry[]>([]);
+
+
 const { isShieldmaiden } = useWarriorProfile();
   const fadeAnim        = useRef(new Animated.Value(0)).current;
   const runeAnim        = useRef(new Animated.Value(0)).current;
@@ -343,16 +346,34 @@ useFocusEffect(useCallback(() => {
       setTrialClaimed(await isTrialClaimedThisWeek());
     } catch (e) {}
   }
+  async function loadLegends() {
+  setLegends(await getLegends());
+}
 
-  async function handleClaimTrial() {
+    async function handleClaimTrial() {
     if (!trialProgress?.complete || trialClaimed) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     await claimTrialReward();
     addXP(WEEKLY_TRIAL_REWARD_XP);
     loadWarrior();
     setTrialClaimed(true);
-  }
 
+    const stats = getWeeklyTrialStats();
+    await recordLegend({
+      weekIndex: getWeekIndex(),
+      trialId: trialProgress.trial.id,
+      title: trialProgress.trial.title,
+      rune: trialProgress.trial.rune,
+      metric: trialProgress.trial.metric,
+      target: trialProgress.trial.target,
+      finalValue: trialProgress.current,
+      workoutsThisWeek: stats.workoutsThisWeek,
+      completedDate: new Date().toISOString().slice(0, 10),
+      seasonLabel: seasonalTheme?.label ?? null,
+      seasonColor: seasonalTheme?.color ?? null,
+    });
+    loadLegends();
+  }
   async function loadVacationState() {
     try {
       const active = await getActiveVacation();

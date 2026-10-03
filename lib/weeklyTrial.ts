@@ -105,7 +105,7 @@ function getCurrentWeekStart(): Date {
   return weekStart;
 }
 
-function getWeekIndex(): number {
+export function getWeekIndex(): number {
   const weekStart = getCurrentWeekStart();
   const msPerWeek = 7 * 24 * 60 * 60 * 1000;
   return Math.floor((weekStart.getTime() - REFERENCE_SUNDAY.getTime()) / msPerWeek);

@@ -11,10 +11,10 @@ import { getMacroGoals, updateMacroGoals, getLatestWeight, getWeightChange } fro
 import { Colors, Fonts, Spacing, Radii } from '@/constants/theme';
 
 const PRESETS = [
-  { label: 'BERSERKER', sub: 'Bulk & Strength', calories: 3200, protein: 220, carbs: 380, fat: 100, water: 160, icon: '🔥' },
-  { label: 'WARRIOR', sub: 'Recomp & Performance', calories: 2500, protein: 180, carbs: 250, fat: 80, water: 128, icon: '⚔️' },
-  { label: 'SHIELDMAIDEN', sub: 'Lean & Tone', calories: 1800, protein: 140, carbs: 180, fat: 60, water: 100, icon: '🛡️' },
-  { label: 'RAID MODE', sub: 'Cut & Define', calories: 1500, protein: 160, carbs: 120, fat: 50, water: 112, icon: '🗡️' },
+  { label: 'BERSERKER', sub: 'Bulk & Strength', calories: 3200, protein: 220, carbs: 380, fat: 100, fiber: 40, water: 160, icon: '🔥' },
+  { label: 'WARRIOR', sub: 'Recomp & Performance', calories: 2500, protein: 180, carbs: 250, fat: 80, fiber: 30, water: 128, icon: '⚔️' },
+  { label: 'SHIELDMAIDEN', sub: 'Lean & Tone', calories: 1800, protein: 140, carbs: 180, fat: 60, fiber: 25, water: 100, icon: '🛡️' },
+  { label: 'RAID MODE', sub: 'Cut & Define', calories: 1500, protein: 160, carbs: 120, fat: 50, fiber: 25, water: 112, icon: '🗡️' },
 ];
 
 // Plain functional names only — no Norse subtitle underneath. Unlike Mead
@@ -26,6 +26,7 @@ const GOAL_ITEMS = [
   { key: 'protein',  label: 'PROTEIN',  unit: 'g',   color: Colors.gold, rune: 'ᚦ' },
   { key: 'carbs',    label: 'CARBS',    unit: 'g',   color: Colors.ice,  rune: 'ᚨ' },
   { key: 'fat',      label: 'FAT',      unit: 'g',   color: '#8B6FD4',   rune: 'ᛗ' },
+  { key: 'fiber',    label: 'FIBER',    unit: 'g',   color: '#4CAF50',   rune: 'ᛈ' },
   { key: 'water',    label: 'WATER',    unit: 'oz',  color: '#5BA3C7',   rune: 'ᛇ' },
 ];
 
@@ -34,6 +35,7 @@ export default function MacroGoalsModal() {
   const [protein, setProtein] = useState('180');
   const [carbs, setCarbs] = useState('250');
   const [fat, setFat] = useState('80');
+  const [fiber, setFiber] = useState('30');
   const [water, setWater] = useState('128');
   const [latestWeight, setLatestWeight] = useState<number | null>(null);
   const [weightChange, setWeightChange] = useState<number | null>(null);
@@ -45,6 +47,7 @@ export default function MacroGoalsModal() {
     protein: [protein, setProtein],
     carbs: [carbs, setCarbs],
     fat: [fat, setFat],
+    fiber: [fiber, setFiber],
     water: [water, setWater],
   };
 
@@ -58,6 +61,7 @@ export default function MacroGoalsModal() {
     setProtein(String(goals.protein));
     setCarbs(String(goals.carbs));
     setFat(String(goals.fat));
+    setFiber(String(goals.fiber));
     setWater(String(goals.water_goal_oz));
 
     const latest = getLatestWeight();
@@ -71,6 +75,7 @@ export default function MacroGoalsModal() {
     setProtein(String(preset.protein));
     setCarbs(String(preset.carbs));
     setFat(String(preset.fat));
+    setFiber(String(preset.fiber));
     setWater(String(preset.water));
   }
 
@@ -80,7 +85,8 @@ export default function MacroGoalsModal() {
     const cb = parseInt(carbs) || 250;
     const f = parseInt(fat) || 80;
     const w = parseInt(water) || 128;
-    updateMacroGoals(c, p, cb, f, w);
+    const fib = parseInt(fiber) || 30;
+    updateMacroGoals(c, p, cb, f, w, fib);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     router.back();
   }
